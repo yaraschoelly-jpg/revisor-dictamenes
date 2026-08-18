@@ -8,7 +8,7 @@ import io
 st.set_page_config(page_title="Auditor Pericial Cruzado", page_icon="⚖️", layout="centered")
 
 st.title("⚖️ Auditor Pericial de Dictámenes (Validación de Encomillado)")
-st.write("Sube el **PDF de Solicitud** y tu **Word del Dictamen**. El sistema validará la Carpeta, el Oficio y revisará que **todas las citas del documento** estén correctamente encomilladas.")
+st.write("Sube el **PDF de Solicitud** y tu **Word del Dictamen**. El sistema corregirá automáticamente el encomillado defectuoso en todo el documento.")
 
 # Definición de los rubros mandatorios en el dictamen
 RUBROS_BASE = [
@@ -26,7 +26,7 @@ with col_docx:
     archivo_docx = st.file_uploader("Subir Dictamen Pericial en Word (.docx)", type=["docx"])
 
 if archivo_pdf is not None and archivo_docx is not None:
-    st.info("🔍 Ejecutando auditoría de consistencia y control de citas... Por favor, espera.")
+    st.info("🔍 Ejecutando auditoría de consistencia y corrección de citas... Por favor, espera.")
     
     # --- 1. EXTRACCIÓN DE TEXTO DEL PDF ---
     texto_pdf = ""
@@ -87,7 +87,7 @@ if archivo_pdf is not None and archivo_docx is not None:
                             run.font.highlight_color = WD_COLOR_INDEX.YELLOW
                         errores_encabezado_cuenta += 1
 
-    # B. Revisión del Cuerpo, Incongruencias y Control de Encomillado
+    # B. Revisión del Cuerpo, Incongruencias y Corrección Automática de Encomillado
     tiene_ecatepec = False
     tiene_iztapalapa = False
 
@@ -103,19 +103,26 @@ if archivo_pdf is not None and archivo_docx is not None:
         if "iztapalapa" in txt_lower:
             tiene_iztapalapa = True
 
-        # --- VALIDACIÓN: CONTROL DE ENCOMILLADO EN TODO EL DOCUMENTO ---
-        if "(...)" in txt or "(_)" in txt or "( … )" in txt:
+        # --- CORRECCIÓN FÍSICA AUTOMÁTICA DE ENCOMILLADO ---
+        # Si el párrafo tiene indicios de citas rotas o marcas de plantilla erróneas
+        if any(marca in txt for i, marca in enumerate(["(...)", "(_)", "( … )", "(_ )"])):
+            # Limpiamos los elementos XML del párrafo para reescribirlo de forma segura e impecable
+            texto_corregido = txt
+            # Eliminamos los paréntesis corruptos de plantilla
+            texto_corregido = re.sub(r'\(\.\.\.\)|\(_\)|\( … \)|\(_ \)', '', texto_corregido)
+            
+            # Buscamos el texto que está después de los dos puntos de la cita
+            if "dice:" in texto_corregido:
+                partes = texto_corregido.split("dice:")
+                frase_citada = partes[1].strip().strip('"').strip('“').strip('”').strip()
+                # Unificamos con el formato correcto estricto: abre comilla y cierra comilla de forma limpia
+                texto_corregido = f"{partes[0]}dice: \"{frase_citada}\""
+            
+            parrafo.text = texto_corregido
             for run in parrafo.runs:
                 run.font.highlight_color = WD_COLOR_INDEX.YELLOW
             errores_encomillado_cuenta += 1
-            alertas_encomillado.append(f"❌ **Párrafo {i}:** Contiene marcas de plantilla erróneas como `(...)`. Debe abrir con `\" ` y cerrar con ` \"`.")
-
-        cuenta_comillas = txt.count('"') + txt.count('“') + txt.count('”')
-        if cuenta_comillas % 2 != 0:
-            for run in parrafo.runs:
-                run.font.highlight_color = WD_COLOR_INDEX.YELLOW
-            errores_encomillado_cuenta += 1
-            alertas_encomillado.append(f"❌ **Párrafo {i}:** Se detectó una cita con comillas impares. Asegúrate de cerrar correctamente la frase encomillada.")
+            alertas_encomillado.append(f"✅ **Párrafo {i}:** Se corrigió automáticamente el encomillado y se eliminaron las marcas `(...)`.")
 
         # VALIDACIÓN DEL OFICIO
         if "antecedente" in txt_lower or "oficio número" in txt_lower or "oficio numero" in txt_lower:
@@ -139,13 +146,13 @@ if archivo_pdf is not None and archivo_docx is not None:
             if "roció" in txt_lower or "rocio" in txt_lower:
                 palabras_sospechosas.append(txt)
 
-    st.success("✅ ¡Cruce pericial de datos y control de encomillado completados!")
+    st.success("✅ ¡Cruce pericial de datos y corrección automática completados!")
     st.divider()
 
     # --- REPORTE EN PANTALLA: CONTROL DE CITAS ENCOMILLADAS ---
     st.subheader("🖍️ 1. Reporte de Citas y Encomillado Obligatorio")
     if alertas_encomillado:
-        st.warning(f"Se detectaron {len(alertas_encomillado)} párrafos con citas mal estructuradas:")
+        st.warning(f"Se reestructuraron {len(alertas_encomillado)} párrafos con errores de comillas en el Word:")
         for alerta in alertas_encomillado:
             st.markdown(alerta)
     else:
@@ -208,6 +215,3 @@ if archivo_pdf is not None and archivo_docx is not None:
         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
 else:
-    st.warning("💡 Por favor, sube **ambos archivos** (el PDF del Oficio y el Word de tu Dictamen) para iniciar la auditoría cruzada.")
-
-

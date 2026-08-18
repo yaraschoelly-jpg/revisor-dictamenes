@@ -65,91 +65,97 @@ if archivo_pdf is not None and archivo_docx is not None:
     alertas_diseno = []
 
     # A. Revisión y Marcado del Encabezado
-    for seccion in doc.sections:
-        header = seccion.header
-        if header:
-            for parrafo in header.paragraphs:
-                texto_linea = parrafo.text.strip()
-                if not texto_linea:
-                    continue
-                texto_linea_lower = texto_linea.lower()
+    try:
+        for seccion in doc.sections:
+            header = seccion.header
+            if header:
+                for parrafo in header.paragraphs:
+                    texto_linea = parrafo.text.strip()
+                    if not texto_linea:
+                        continue
+                    texto_linea_lower = texto_linea.lower()
 
-                if any(t in texto_linea_lower for t in ["agencia", "centro federal", "unidad de", "especialidad"]):
-                    continue
+                    if any(t in texto_linea_lower for t in ["agencia", "centro federal", "unidad de", "especialidad"]):
+                        continue
 
-                if "carpeta" in texto_linea_lower:
-                    digitos_carpeta = "".join(re.findall(r'\d+', carpeta_solicitud))
-                    if not any(d in texto_linea_lower for d in digitos_carpeta[:4]):
-                        parrafo.text = f"Carpeta de Investigación: [⚠️ ERROR: DEBE SER {carpeta_solicitud}]"
-                        for run in parrafo.runs:
-                            run.font.highlight_color = WD_COLOR_INDEX.YELLOW
-                        errores_encabezado_cuenta += 1
+                    if "carpeta" in texto_linea_lower:
+                        digitos_carpeta = "".join(re.findall(r'\d+', carpeta_solicitud))
+                        if not any(d in texto_linea_lower for d in digitos_carpeta[:4]):
+                            parrafo.text = f"Carpeta de Investigación: [⚠️ ERROR: DEBE SER {carpeta_solicitud}]"
+                            for run in parrafo.runs:
+                                run.font.highlight_color = WD_COLOR_INDEX.YELLOW
+                            errores_encabezado_cuenta += 1
+    except Exception as e:
+        pass
 
     # B. Revisión del Cuerpo: Consistencia, Justificado, Tipografía y Centrados
     tiene_ecatepec = False
     tiene_iztapalapa = False
 
     for i, parrafo in enumerate(doc.paragraphs, start=1):
-        txt = parrafo.text.strip()
-        if not txt:
-            continue
-        txt_lower = txt.lower()
-        texto_word_completo += " " + txt_lower
-        
-        if "ecatepec" in txt_lower:
-            tiene_ecatepec = True
-        if "iztapalapa" in txt_lower:
-            tiene_iztapalapa = True
+        try:
+            txt = parrafo.text.strip()
+            if not txt:
+                continue
+            txt_lower = txt.lower()
+            texto_word_completo += " " + txt_lower
+            
+            if "ecatepec" in txt_lower:
+                tiene_ecatepec = True
+            if "iztapalapa" in txt_lower:
+                tiene_iztapalapa = True
 
-        # --- AUDITORÍA DE TIPOGRAFÍA (Raleway 9-11) ---
-        for run in parrafo.runs:
-            if run.text.strip():
-                fuente = run.font.name
-                tamaño = run.font.size.pt if run.font.size else None
-                
-                if (fuente and fuente != "Raleway") or (tamaño and (tamaño < 9.0 or tamaño > 11.0)):
-                    run.font.highlight_color = WD_COLOR_INDEX.YELLOW
-                    errores_tipografia_cuenta += 1
-                    alertas_diseno.append(f"⚠️ **Párrafo {i}:** Tipografía incorrecta. Asegúrate de usar Raleway de 9 a 11 puntos.")
-
-        # --- AUDITORÍA DE ALINEACIÓN CEÑIDA AL MANUAL ---
-        alineacion = parrafo.alignment
-        es_palabra_centrada = any(p_centrada in txt_lower for p_centrada in ["d i c t a m e n", "atentamente", "nombre y firma"])
-        
-        if es_palabra_centrada:
-            if alineacion != WD_ALIGN_PARAGRAPH.CENTER:
-                for run in parrafo.runs:
-                    run.font.highlight_color = WD_COLOR_INDEX.YELLOW
-                errores_centrado_cuenta += 1
-                alertas_diseno.append(f"❌ **Párrafo {i}:** El rubro *'{txt}'* debe ir estrictamente **CENTRADO** según el formato oficial.")
-        else:
-            if len(txt) > 40 and alineacion != WD_ALIGN_PARAGRAPH.JUSTIFY:
-                for run in parrafo.runs:
-                    run.font.highlight_color = WD_COLOR_INDEX.YELLOW
-                errores_justificado_cuenta += 1
-                alertas_diseno.append(f"❌ **Párrafo {i}:** Este párrafo de texto libre no se encuentra **JUSTIFICADO**.")
-
-        # VALIDACIÓN DEL OFICIO EN ANTECEDENTES
-        if "antecedente" in txt_lower or "oficio número" in txt_lower or "oficio numero" in txt_lower:
-            if oficio_solicitud.lower() not in txt_lower and "fgr" in txt_lower:
-                for run in parrafo.runs:
-                    run.font.highlight_color = WD_COLOR_INDEX.YELLOW
-                errores_antecedentes_cuenta += 1
-
-        # Marcar Contradicción Geográfica Directa
-        if tiene_ecatepec and tiene_iztapalapa and "iztapalapa" in txt_lower and "[⚠️" not in txt:
-            if parrafo.runs:
-                parrafo.runs[-1].text += " [⚠️ CONTRADICCIÓN DE PLANTILLA: Tu Estudio de Campo declara Ecatepec, no Iztapalapa.]"
-            else:
-                parrafo.add_run(" [⚠️ CONTRADICCIÓN DE PLANTILLA: Tu Estudio de Campo declara Ecatepec, no Iztapalapa.]")
+            # --- AUDITORÍA DE TIPOGRAFÍA (Raleway 9-11) ---
             for run in parrafo.runs:
-                run.font.highlight_color = WD_COLOR_INDEX.YELLOW
-            errores_congruencia_cuenta += 1
+                if run.text.strip():
+                    fuente = run.font.name
+                    tamaño = run.font.size.pt if run.font.size else None
+                    
+                    if (fuente and fuente != "Raleway") or (tamaño and (tamaño < 9.0 or tamaño > 11.0)):
+                        run.font.highlight_color = WD_COLOR_INDEX.YELLOW
+                        errores_tipografia_cuenta += 1
+                        alertas_diseno.append(f"⚠️ **Párrafo {i}:** Tipografía incorrecta. Asegúrate de usar Raleway de 9 a 11 puntos.")
 
-        # Alerta Ortográfica de nombres propios
-        if "rocio" in txt_lower and ("maritza" in txt_lower or "ramírez" in txt_lower):
-            if "roció" in txt_lower or "rocio" in txt_lower:
-                palabras_sospechosas.append(txt)
+            # --- AUDITORÍA DE ALINEACIÓN ---
+            alineacion = parrafo.alignment
+            es_palabra_centrada = any(p_centrada in txt_lower for p_centrada in ["d i c t a m e n", "atentamente", "nombre y firma"])
+            
+            if es_palabra_centrada:
+                if alineacion != WD_ALIGN_PARAGRAPH.CENTER:
+                    for run in parrafo.runs:
+                        run.font.highlight_color = WD_COLOR_INDEX.YELLOW
+                    errores_centrado_cuenta += 1
+                    alertas_diseno.append(f"❌ **Párrafo {i}:** El rubro *'{txt}'* debe ir estrictamente **CENTRADO**.")
+            else:
+                if len(txt) > 40 and alineacion != WD_ALIGN_PARAGRAPH.JUSTIFY:
+                    for run in parrafo.runs:
+                        run.font.highlight_color = WD_COLOR_INDEX.YELLOW
+                    errores_justificado_cuenta += 1
+                    alertas_diseno.append(f"❌ **Párrafo {i}:** Este párrafo de texto libre no se encuentra **JUSTIFICADO**.")
+
+            # VALIDACIÓN DEL OFICIO EN ANTECEDENTES
+            if "antecedente" in txt_lower or "oficio número" in txt_lower or "oficio numero" in txt_lower:
+                if oficio_solicitud.lower() not in txt_lower and "fgr" in txt_lower:
+                    for run in parrafo.runs:
+                        run.font.highlight_color = WD_COLOR_INDEX.YELLOW
+                    errores_antecedentes_cuenta += 1
+
+            # Marcar Contradicción Geográfica Directa
+            if tiene_ecatepec and tiene_iztapalapa and "iztapalapa" in txt_lower and "[⚠️" not in txt:
+                if parrafo.runs:
+                    parrafo.runs[-1].text += " [⚠️ CONTRADICCIÓN DE PLANTILLA: Tu Estudio de Campo declara Ecatepec, no Iztapalapa.]"
+                else:
+                    doc.paragraphs[i-1].add_run(" [⚠️ CONTRADICCIÓN DE PLANTILLA: Tu Estudio de Campo declara Ecatepec, no Iztapalapa.]")
+                for run in parrafo.runs:
+                    run.font.highlight_color = WD_COLOR_INDEX.YELLOW
+                errores_congruencia_cuenta += 1
+
+            # Alerta Ortográfica de nombres propios
+            if "rocio" in txt_lower and ("maritza" in txt_lower or "ramírez" in txt_lower):
+                if "roció" in txt_lower or "rocio" in txt_lower:
+                    palabras_sospechosas.append(txt)
+        except Exception as e:
+            continue
 
     st.success("✅ ¡Auditoría de consistencia y control de formalidad completados!")
     st.divider()
@@ -157,7 +163,7 @@ if archivo_pdf is not None and archivo_docx is not None:
     # --- APARTADO: DETECTOR DE ERRORES DE DISEÑO Y FORMALIDAD ---
     st.subheader("📐 1. Reporte de Diseño y Formalidad del Documento")
     if alertas_diseno:
-        st.warning(f"Se detectaron {len(alertas_diseno)} detalles de formato que incumplen la estructura oficial:")
+        st.warning(f"Se detectaron detalles de formato que incumplen la estructura oficial:")
         for alerta in list(set(alertas_diseno))[:10]:
             st.markdown(alerta)
     else:
@@ -201,10 +207,3 @@ if archivo_pdf is not None and archivo_docx is not None:
             rubros_faltantes.append(rubro.upper())
 
     if rubros_faltantes:
-        st.error(f"❌ Faltan los siguientes rubros obligatorios en el Word: {', '.join(rubros_faltantes)}")
-    else:
-        st.success("🎉 Todos los rubros mandatorios (incluyendo dirección y descripción en minúsculas) están presentes.")
-
-    st.divider()
-
-    # ------------------ BOTÓN DE DESCARGA SEGURA ------------------

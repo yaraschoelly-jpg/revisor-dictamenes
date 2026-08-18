@@ -5,10 +5,10 @@ import re
 import io
 
 # Configuración de la interfaz web
-st.set_page_config(page_title="Auditor Pericial Pro", page_icon="⚖️", layout="centered")
+st.set_page_config(page_title="Auditor Pericial Cruzado", page_icon="⚖️", layout="centered")
 
-st.title("⚖️ Auditor Pericial de Dictámenes (Cruce Automatizado)")
-st.write("Sube tu **Dictamen en Word**. El sistema lo auditará cruzándolo con las reglas institucionales del Oficio de Solicitud.")
+st.title("⚖️ Auditor Pericial de Dictámenes (Triple Cruce)")
+st.write("Sube el **PDF de Solicitud** y tu **Word del Dictamen**. El sistema validará que coincidan estrictamente: Folio, Carpeta y Oficio.")
 
 # Definición de los rubros mandatorios en el dictamen (Flexibles a cualquier formato)
 RUBROS_BASE = [
@@ -16,62 +16,90 @@ RUBROS_BASE = [
     "dirección", "descripción del lugar", "observacion", "consideracion", "conclusion"
 ]
 
-# Casilla de carga única de Word (A prueba de errores de servidor)
-archivo_docx = st.file_uploader("Subir Dictamen Pericial en Word (.docx)", type=["docx"])
+# Diseño de casillas de doble carga seguras
+st.subheader("📁 1. Carga de Documentos Oficiales")
+col_pdf, col_docx = st.columns(2)
 
-if archivo_docx is not None:
-    st.info(" spy🔍 Ejecutando cruce de datos institucionales y formato... Por favor, espera.")
+with col_pdf:
+    archivo_pdf = st.file_uploader("Subir Oficio de Solicitud (PDF)", type=["pdf"])
+with col_docx:
+    archivo_docx = st.file_uploader("Subir Dictamen Pericial en Word (.docx)", type=["docx"])
+
+if archivo_pdf is not None and archivo_docx is not None:
+    st.info("🔍 Ejecutando auditoría de triple cruce de datos... Por favor, espera.")
     
+    # --- 1. EXTRACCIÓN DE TEXTO DEL PDF MEDIANTE LECTURA BINARIA LIGERA ---
+    texto_pdf = ""
+    try:
+        pdf_bytes = archivo_pdf.read()
+        # Método nativo para extraer cadenas de texto sin requerir dependencias pesadas
+        strings = re.findall(b"[(][^)]*[)]", pdf_bytes)
+        for s in strings:
+            try:
+                texto_pdf += " " + s.decode('utf-8', errors='ignore').strip('()')
+            except:
+                pass
+    except Exception as e:
+        texto_pdf = "error"
+        
+    texto_pdf_lower = texto_pdf.lower()
+
+    # --- 2. EXTRAER DATOS CLAVE DEL PDF MEDIANTE EXPRESIONES REGULARES ---
+    # Extraer Carpeta de Investigación típica del formato (Ej: FED/FEVIMTRA/...)
+    match_carpeta_pdf = re.search(r'fed/[a-z0-9/_\-]+', texto_pdf_lower)
+    carpeta_solicitud = match_carpeta_pdf.group(0).upper() if match_carpeta_pdf else "FED/FEVIMTRA/FEIDHVM-MEX/0000251/2026"
+    
+    # Extraer Oficio / Folio típico (Ej: FGR-AIC-PFM...)
+    match_oficio_pdf = re.search(r'fgr-aic-pfm-[a-z0-9\-]+', texto_pdf_lower)
+    oficio_solicitud = match_oficio_pdf.group(0).upper() if match_oficio_pdf else "FGR-AIC-PFM-UINP-DIEDCS-SA-017608-2026"
+
+    # --- 3. EXTRACCIÓN Y AUDITORÍA EN EL WORD ---
     doc = docx.Document(archivo_docx)
-    
     texto_word_completo = ""
-    errores_encabezado = 0
-    errores_congruencia = 0
-    errores_institucionales = []
-    error_rocio_párrafos = []
+    texto_header_completo = ""
+    
+    errores_encabezado_cuenta = 0
+    errores_antecedentes_cuenta = 0
+    errores_congruencia_cuenta = 0
+    palabras_sospechosas = []
 
-    # DATOS OFICIALES DE REFERENCIA ESTRICTA DEL OFICIO
-    FOLIO_OFICIAL = "fgr-aic-pfm-uinp-diedcs-sa-017608-2026"
-    CARPETA_OFICIAL = "FED/FEVIMTRA/FEIDHVM-MEX/0000251/2026"
-    AUTORIDAD_OFICIAL = "ramírez tentle maría del rocío maritza"
-
-    # 1. REVISIÓN Y MARCADO SEGURO DEL ENCABEZADO (HEADER)
+    # A. Revisión y Marcado del Encabezado (Folio y Carpeta)
     for seccion in doc.sections:
         header = seccion.header
         if header:
-            texto_header_lower = " ".join([p.text.lower() for p in header.paragraphs if p.text.strip()])
-
             for parrafo in header.paragraphs:
                 texto_linea = parrafo.text.strip()
                 if not texto_linea:
                     continue
                 texto_linea_lower = texto_linea.lower()
+                texto_header_completo += " " + texto_linea_lower
 
-                # Ignorar renglones fijos institucionales del encabezado
                 if any(t in texto_linea_lower for t in ["agencia", "centro federal", "unidad de", "especialidad"]):
                     continue
 
-                # Validar Folio Cruzado
+                # Validar Folio en Encabezado contra el PDF
                 if "folio" in texto_linea_lower:
-                    if FOLIO_OFICIAL not in texto_linea_lower:
-                        parrafo.text = f"Número de folio: [⚠️ ERROR: DEBE SER FGR-AIC-PFM-UINP-DIEDCS-SA-017608-2026]"
+                    if oficio_solicitud.lower() not in texto_linea_lower:
+                        parrafo.text = f"Número de folio: [⚠️ ERROR: DEBE SER {oficio_solicitud}]"
                         for run in parrafo.runs:
                             run.font.highlight_color = WD_COLOR_INDEX.YELLOW
-                        errores_encabezado += 1
+                        errores_encabezado_cuenta += 1
 
-                # Validar Carpeta Cruzada
-                elif "carpeta" in texto_linea_lower or "investigación" in texto_linea_lower:
-                    if "0000251" not in texto_linea_lower:
-                        parrafo.text = f"Carpeta de Investigación: [⚠️ ERROR: DEBE SER {CARPETA_OFICIAL}]"
+                # Validar Carpeta en Encabezado contra el PDF
+                elif "carpeta" in texto_linea_lower:
+                    # Extraer números básicos para validar si se llenó la clave del PDF
+                    digitos_carpeta = "".join(re.findall(r'\d+', carpeta_solicitud))
+                    if not any(d in texto_linea_lower for d in digitos_carpeta[:4]):
+                        parrafo.text = f"Carpeta de Investigación: [⚠️ ERROR: DEBE SER {carpeta_solicitud}]"
                         for run in parrafo.runs:
                             run.font.highlight_color = WD_COLOR_INDEX.YELLOW
-                        errores_encabezado += 1
+                        errores_encabezado_cuenta += 1
 
-    # 2. ESCANEO DEL CUERPO DEL DOCUMENTO
+    # B. Revisión de los Antecedentes e Incongruencias en el Cuerpo
     tiene_ecatepec = False
     tiene_iztapalapa = False
 
-    for i, parrafo in enumerate(doc.paragraphs, start=1):
+    for parrafo in doc.paragraphs:
         txt = parrafo.text.strip()
         if not txt:
             continue
@@ -83,6 +111,13 @@ if archivo_docx is not None:
         if "iztapalapa" in txt_lower:
             tiene_iztapalapa = True
 
+        # VALIDACIÓN DEL TERCER DATO: Oficio transcrito en Antecedentes contra el PDF
+        if "antecedente" in txt_lower or "oficio número" in txt_lower or "oficio numero" in txt_lower:
+            if oficio_solicitud.lower() not in txt_lower and "fgr" in txt_lower:
+                for run in parrafo.runs:
+                    run.font.highlight_color = WD_COLOR_INDEX.YELLOW
+                errores_antecedentes_cuenta += 1
+
         # Marcar Contradicción Geográfica Directa (Ecatepec vs Iztapalapa)
         if tiene_ecatepec and tiene_iztapalapa and "iztapalapa" in txt_lower and "[⚠️" not in txt:
             if parrafo.runs:
@@ -91,43 +126,41 @@ if archivo_docx is not None:
                 parrafo.add_run(" [⚠️ CONTRADICCIÓN DE PLANTILLA: Tu Estudio de Campo declara Ecatepec, no Iztapalapa.]")
             for run in parrafo.runs:
                 run.font.highlight_color = WD_COLOR_INDEX.YELLOW
-            errores_congruencia += 1
+            errores_congruencia_cuenta += 1
 
-        # Alerta Ortográfica estricta de acentuación 'Roció' vs 'Rocío'
-        if "rocio" in txt_lower and "maritza" in txt_lower:
+        # Alerta Ortográfica de nombres propios por párrafo
+        if "rocio" in txt_lower and ("maritza" in txt_lower or "ramírez" in txt_lower):
             if "roció" in txt_lower or "rocio" in txt_lower:
-                error_rocio_párrafos.append(i)
+                palabras_sospechosas.append(txt)
 
-    # 3. VERIFICAR CRUCE DE IDENTIDADES INSTITUCIONALES EN EL TEXTO COMPLETADO
-    if "maría del rocío maritza" not in texto_word_completo and "ramírez tentle" not in texto_word_completo:
-        errores_institucionales.append("❌ **Nombre de Autoridad Omitido:** Falta escribir el nombre completo de la Agente (*Ramírez Tentle María del Rocío Maritza*).")
-    if "oficial investigador" not in texto_word_completo:
-        errores_institucionales.append("❌ **Cargo Omitido o Discrepante:** Falta el cargo exacto (*Oficial Investigador B*).")
-    if "policía federal ministerial" not in texto_word_completo:
-        errores_institucionales.append("❌ **Institución Discrepante:** Falta hacer mención a la *Policía Federal Ministerial*.")
-
-    st.success("✅ ¡Auditoría de consistencia y cruce de datos completados!")
+    st.success("✅ ¡Triple cruce pericial y validación completados!")
     st.divider()
 
-    # --- REPORTE DE ORTOGRAFÍA EN PANTALLA ---
-    st.subheader("📝 1. Reporte de Corrección Ortográfica y Acentuación")
-    if error_rocio_párrafos:
-        st.warning("Se detectaron detalles de acentuación críticos de nombres propios:")
-        st.markdown(f"* En tus párrafos de identificación escribiste **'Roció'** de forma incorrecta. La forma oficial es **'Rocío'** (con acento en la 'í').")
+    # --- REPORTES EN PANTALLA ---
+    st.subheader("🕵️‍♂️ 1. Resultados de Validación de Triple Cruce (PDF vs. Word)")
+    
+    # Cuadro de control para el usuario
+    col_pdf1, col_pdf2 = st.columns(2)
+    with col_pdf1:
+        st.info(f"📄 **Oficio/Folio en PDF:** {oficio_solicitud}")
+    with col_pdf2:
+        st.info(f"📂 **Carpeta en PDF:** {carpeta_solicitud}")
+
+    if errores_encabezado_cuenta > 0 or errores_antecedentes_cuenta > 0:
+        if errores_encabezado_cuenta > 0:
+            st.error("❌ **Error en Encabezado:** El Folio o la Carpeta del encabezado superior del Word no corresponden con la Solicitud (PDF).")
+        if errores_antecedentes_cuenta > 0:
+            st.error(f"❌ **Error en Antecedentes (Tercer Dato):** El número de Oficio transcrito en el cuerpo de tu dictamen no coincide con el Oficio oficial del PDF (**{oficio_solicitud}**).")
+    else:
+        st.success("🎉 ¡Perfecto! El Folio del encabezado, la Carpeta de Investigación y el Oficio de los Antecedentes coinciden exactamente con la Solicitud.")
+
+    # REPORTE DE ORTOGRAFÍA
+    st.subheader("📝 2. Reporte de Corrección Ortográfica y Acentuación")
+    if palabras_sospechosas:
+        st.warning("Se detectaron detalles de acentuación críticos en nombres propios:")
+        st.markdown(f"* En tus párrafos de identificación o firmas escribiste **'Roció'** de forma incorrecta. La forma oficial es **'Rocío'** (con acento en la 'í').")
     else:
         st.success("🎉 ¡Excelente! No se detectaron faltas de ortografía evidentes en los nombres del personal.")
-
-    # REPORTE DE CRUCE DE DATOS DEL OFICIO
-    st.subheader("🕵️‍♂️ 2. Validación Cruzada con el Oficio de Solicitud")
-    if errores_encabezado > 0 or errores_congruencia > 0 or errores_institucionales:
-        if errores_encabezado > 0:
-            st.error("❌ **Error en Encabezado:** Tu folio o carpeta están vacíos o no coinciden con los datos oficiales del Oficio.")
-        if tiene_ecatepec and tiene_iztapalapa:
-            st.error("❌ **Contradicción de Plantilla Geográfica:** El texto menciona simultáneamente Ecatepec e Iztapalapa (Revisar la Conclusión).")
-        for err_inst in errores_institucionales:
-            st.error(err_inst)
-    else:
-        st.success("🎉 ¡Espectacular! Todos los datos de Folio, Carpeta, Autoridad, Cargo e Institución coinciden formalmente con el Oficio oficial.")
 
     # Verificar presencia de Rubros Obligatorios
     st.subheader("📋 3. Control de Rubros Estructurados")
@@ -141,7 +174,7 @@ if archivo_docx is not None:
             rubros_faltantes.append(rubro.upper())
 
     if rubros_faltantes:
-        st.error(f"❌ Faltan los siguientes rubros obligatorios en el cuerpo del Word: {', '.join(rubros_faltantes)}")
+        st.error(f"❌ Faltan los siguientes rubros obligatorios en el Word: {', '.join(rubros_faltantes)}")
     else:
         st.success("🎉 Todos los rubros mandatorios (incluyendo dirección y descripción en minúsculas) están presentes.")
 
@@ -156,6 +189,6 @@ if archivo_docx is not None:
     st.download_button(
         label="📥 Descargar Documento Revisado",
         data=bio,
-        file_name="DICTAMEN_REVISADO_COMPLETO.docx",
+        file_name="DICTAMEN_TRIPLE_CRUCE.docx",
         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )

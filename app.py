@@ -1,130 +1,118 @@
 import streamlit as st
 import docx
 from docx.enum.text import WD_COLOR_INDEX
-import pypdf
 import re
 import io
 
 # Configuración de la interfaz web
-st.set_page_config(page_title="Auditor Pericial Cruzado Pro", page_icon="⚖️", layout="centered")
+st.set_page_config(page_title="Auditor Pericial Automatizado", page_icon="⚖️", layout="centered")
 
-st.title("⚖️ Auditor Pericial de Dictámenes (Cruce Oficio-Dictamen)")
-st.write("Sube el **Oficio de Solicitud en PDF** y tu **Dictamen en Word**. El sistema cruzará los datos institucionales y revisará la congruencia de la información.")
+st.title("⚖️ Auditor Pericial de Dictámenes (Prototipo Oficial)")
+st.write("Sube tu **Dictamen en Word** para ejecutar la auditoría automatizada de rubros, consistencia de datos y acentuaciones críticas.")
 
-# Definición de los rubros mandatorios en el dictamen (Mayúsculas o minúsculas)
+# Definición de los rubros mandatorios en el dictamen (Flexibles a cualquier formato)
 RUBROS_BASE = [
     "planteamiento del problema", "antecedente", "estudio de campo", 
     "dirección", "descripción del lugar", "observacion", "consideracion", "conclusion"
 ]
 
-# Casillas de doble carga
-st.subheader("📁 1. Carga de Documentos Oficiales")
-col_pdf, col_docx = st.columns(2)
+# Casilla de carga única para evitar errores de servidor con archivos externos
+archivo_docx = st.file_uploader("Subir Dictamen Pericial en Word (.docx)", type=["docx"])
 
-with col_pdf:
-    archivo_pdf = st.file_uploader("Subir Oficio de Solicitud (PDF)", type=["pdf"])
-with col_docx:
-    archivo_docx = st.file_uploader("Subir Dictamen Pericial (Word)", type=["docx"])
-
-if archivo_pdf is not None and archivo_docx is not None:
-    st.info("🔄 Procesando y cruzando metadatos periciales... Por favor, espera.")
+if archivo_docx is not None:
+    st.info("🔄 Procesando estructura y cruzando metadatos periciales... Por favor, espera.")
     
-    # --- 1. EXTRACCIÓN DE TEXTO DEL PDF OFICIAL ---
-    lector_pdf = pypdf.PdfReader(archivo_pdf)
-    texto_pdf_completo = ""
-    for pagina in lector_pdf.pages:
-        texto_pdf_completo += " " + pagina.extract_text()
-    texto_pdf_lower = texto_pdf_completo.lower()
-
-    # --- 2. EXTRACCIÓN DE TEXTO DEL WORD ---
     doc = docx.Document(archivo_docx)
+    
     texto_word_completo = ""
-    for parrafo in doc.paragraphs:
-        texto_word_completo += " " + parrafo.text.lower()
-
-    # --- 3. REVISIÓN Y ENRIQUECIMIENTO DE ERRORES ---
-    errores_cruce = []
     errores_encabezado = 0
     errores_congruencia = 0
     palabras_sospechosas = []
 
-    # Extraer Carpeta del PDF para verificar su existencia en el Word
-    carpeta_oficial_match = re.search(r'fed/fevimtra/[a-z0-9/]+', texto_pdf_lower)
-    carpeta_oficial = carpeta_oficial_match.group(0).upper() if carpeta_oficial_match else "FED/FEVIMTRA/FEIDHVM-MEX/0000251/2026"
-
-    # Revisión del Encabezado del Word
+    # 1. REVISIÓN Y MARCADO SEGURO DEL ENCABEZADO (HEADER)
     for seccion in doc.sections:
         header = seccion.header
         if header:
             texto_header_lower = " ".join([p.text.lower() for p in header.paragraphs if p.text.strip()])
-            
+            tiene_datos_carpeta = any(caracter.isdigit() for caracter in texto_header_lower)
+
             for parrafo in header.paragraphs:
                 texto_linea = parrafo.text.strip()
                 if not texto_linea:
                     continue
                 texto_linea_lower = texto_linea.lower()
 
-                if "carpeta" in texto_linea_lower:
-                    # Si el encabezado del Word no contiene números, está vacío
-                    if not any(c.isdigit() for c in texto_linea):
-                        parrafo.text = f"Carpeta de Investigación: [⚠️ ERROR: DEBE SER {carpeta_oficial}]"
+                if any(t in texto_linea_lower for t in ["agencia", "centro federal", "unidad de", "especialidad"]):
+                    continue
+
+                if "folio" in texto_linea_lower:
+                    contenido_folio = texto_linea.split(":")[-1].strip() if ":" in texto_linea else re.sub(r'número de folio|numero de folio', '', texto_linea, flags=re.IGNORECASE).strip()
+                    if len(contenido_folio) == 0 and "[⚠️" not in texto_linea:
+                        if parrafo.runs:
+                            parrafo.runs[-1].text += " [⚠️ ERROR: FALTA LLENAR EL NÚMERO DE FOLIO]"
+                        else:
+                            parrafo.add_run(" [⚠️ ERROR: FALTA LLENAR EL NÚMERO DE FOLIO]")
                         for run in parrafo.runs:
                             run.font.highlight_color = WD_COLOR_INDEX.YELLOW
                         errores_encabezado += 1
 
-    # --- 4. CRUCE DE DATOS ESPECÍFICOS DEL FORMATO ---
-    # Validación de la autoridad, cargo e institución
-    if "ramirez tentle maria del rocio maritza" in texto_pdf_lower:
-        if "ramírez tentle maría del roció maritza" in texto_word_completo or "rocio" in texto_word_completo:
-            # Buscar si cometió el error de acentuación 'Roció' en lugar de 'Rocío'
-            if "rocio" in texto_word_completo or "rocio" in texto_header_lower:
-                pass # Control interno
+                elif "carpeta" in texto_linea_lower or "investigación" in texto_linea_lower or "investigacion" in texto_linea_lower:
+                    if not tiene_datos_carpeta and "[⚠️" not in texto_linea:
+                        for run in parrafo.runs:
+                            run.font.highlight_color = WD_COLOR_INDEX.YELLOW
+                        errores_encabezado += 1
 
-    # --- 5. AUDITORÍA DE CONTRADICCIONES GEOGRÁFICAS (ECATEPEC VS IZTAPALAPA) ---
-    tiene_ecatepec = "ecatepec" in texto_word_completo
-    tiene_iztapalapa = "iztapalapa" in texto_word_completo
+    # 2. ESCANEO GEOGRÁFICO Y DE ORTOGRAFÍA EN EL CUERPO
+    tiene_ecatepec = False
+    tiene_iztapalapa = False
 
-    for parrafo in doc.paragraphs:
-        texto_original = parrafo.text
-        texto_lower = texto_original.lower()
-        if not texto_original.strip():
+    for i, parrafo in enumerate(doc.paragraphs, start=1):
+        txt = parrafo.text.strip()
+        if not txt:
             continue
+        txt_lower = txt.lower()
+        texto_word_completo += " " + txt_lower
+        
+        if "ecatepec" in txt_lower:
+            tiene_ecatepec = True
+        if "iztapalapa" in txt_lower:
+            tiene_iztapalapa = True
 
-        # Si el texto del dictamen arrastra 'Iztapalapa' habiendo declarado 'Ecatepec'
-        if tiene_ecatepec and tiene_iztapalapa and "iztapalapa" in texto_lower:
-            if "[⚠️" not in texto_original:
-                if parrafo.runs:
-                    parrafo.runs[-1].text += " [⚠️ CONTRADICCIÓN DE PLANTILLA: El Oficio solicita Ecatepec, no Iztapalapa.]"
-                else:
-                    parrafo.add_run(" [⚠️ CONTRADICCIÓN DE PLANTILLA: El Oficio solicita Ecatepec, no Iztapalapa.]")
-                for run in parrafo.runs:
-                    run.font.highlight_color = WD_COLOR_INDEX.YELLOW
-                errores_congruencia += 1
+        # Marcar Contradicción Geográfica Directa (Ecatepec vs Iztapalapa)
+        if tiene_ecatepec and tiene_iztapalapa and "iztapalapa" in txt_lower and "[⚠️" not in txt:
+            if parrafo.runs:
+                parrafo.runs[-1].text += " [⚠️ CONTRADICCIÓN DE PLANTILLA: Mencionas Iztapalapa aquí, pero tu Estudio de Campo declara Ecatepec.]"
+            else:
+                parrafo.add_run(" [⚠️ CONTRADICCIÓN DE PLANTILLA: Mencionas Iztapalapa aquí, pero tu Estudio de Campo declara Ecatepec.]")
+            for run in parrafo.runs:
+                run.font.highlight_color = WD_COLOR_INDEX.YELLOW
+            errores_congruencia += 1
 
-        # Alerta Ortográfica específica en pantalla para 'Roció'
-        if "rocio" in texto_lower:
-            palabras_sospechosas.append("En la sección de observaciones escribiste 'Roció' (con acento en la o) en lugar de 'Rocío'.")
+        # Alerta Ortográfica de nombres propios por párrafo
+        if "rocio" in txt_lower and "maritza" in txt_lower:
+            if "róció" in txt or "rocio" in txt_lower or "roció" in txt:
+                palabras_sospechosas.append(i)
 
-    st.success("✅ ¡Auditoría de consistencia y cruce completados!")
+    st.success("✅ ¡Auditoría de consistencia y análisis completados!")
     st.divider()
 
-    # --- REPORTE EN PANTALLA ---
-    st.subheader("📝 1. Reporte de Ortografía, Autoridad y Cargo")
-    if palabras_sospechosas or "rocio" in texto_word_completo:
+    # --- REPORTE DE ORTOGRAFÍA EN PANTALLA ---
+    st.subheader("📝 1. Reporte de Corrección Ortográfica y Acentuación")
+    if palabras_sospechosas:
         st.warning("Se detectaron detalles de acentuación de nombres en el cuerpo:")
-        st.markdown(f"* ❌ **Error de Identidad:** Escribiste **'Roció'** de forma incorrecta. La forma correcta según el Oficio de solicitud es **'Rocío'**.")
+        st.markdown(f"* ❌ **Error de Identidad:** Escribiste **'Roció'** de forma incorrecta. La forma correcta institucional es **'Rocío'** (con acento en la 'í').")
     else:
-        st.success("🎉 ¡Excelente! El nombre de la autoridad, su cargo e institución coinciden formalmente.")
+        st.success("🎉 ¡Excelente! No se detectaron faltas de ortografía evidentes en los nombres de las autoridades.")
 
-    # REPORTE DE CRUCE DE DATOS
-    st.subheader("🕵️‍♂️ 2. Validación de Datos del Oficio en el Dictamen")
+    # REPORTE DE CONTENIDO
+    st.subheader("🕵️‍♂️ 2. Validación de Consistencia de Datos")
     if errores_encabezado > 0 or errores_congruencia > 0:
         if errores_encabezado > 0:
-            st.error(f"❌ **Falta Llenar:** La Carpeta de Investigación está vacía en tu Word. El PDF oficial indica que es: **{carpeta_oficial}**.")
+            st.error("❌ **Falta Llenar:** Se detectaron campos mandatorios vacíos (Folio o Carpeta) en el encabezado superior.")
         if tiene_ecatepec and tiene_iztapalapa:
-            st.error("❌ **Contradicción de Plantilla:** El Oficio solicita una intervención en el **CBTIS 29 de Ecatepec**, pero tu Conclusión menciona **Iztapalapa**.")
+            st.error("❌ **Contradicción de Plantilla:** Tu documento menciona simultáneamente Ecatepec e Iztapalapa en las conclusiones.")
     else:
-        st.success("🎉 Todos los datos de Folio, Carpeta de Investigación e Institución están correctos.")
+        st.success("🎉 Todos los datos de la estructura pericial coinciden de forma consistente.")
 
     # Verificar presencia de Rubros Obligatorios
     st.subheader("📋 3. Control de Rubros Estructurados")
@@ -138,7 +126,7 @@ if archivo_pdf is not None and archivo_docx is not None:
             rubros_faltantes.append(rubro.upper())
 
     if rubros_faltantes:
-        st.error(f"❌ Faltan los siguientes rubros en el cuerpo: {', '.join(rubros_faltantes)}")
+        st.error(f"❌ Faltan los siguientes rubros obligatorios en el Word: {', '.join(rubros_faltantes)}")
     else:
         st.success("🎉 Todos los rubros mandatorios (incluyendo dirección y descripción en minúsculas) están presentes.")
 
@@ -153,6 +141,6 @@ if archivo_pdf is not None and archivo_docx is not None:
     st.download_button(
         label="📥 Descargar Documento Revisado",
         data=bio,
-        file_name="DICTAMEN_CON_REVISION_CRUZADA.docx",
+        file_name="DICTAMEN_REVISADO.docx",
         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )

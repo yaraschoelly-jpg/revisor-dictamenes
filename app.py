@@ -28,7 +28,7 @@ with col_docx:
 if archivo_pdf is not None and archivo_docx is not None:
     st.info("🔍 Ejecutando auditoría de consistencia de datos y control de diseño OpenXML... Por favor, espera.")
     
-    # --- 1. EXTRACCIÓN DE TEXTO DEL PDF MEDIANTE LECTURA BINARIA LIGERA ---
+    # --- 1. EXTRACCIÓN DE TEXTO DEL PDF ---
     texto_pdf = ""
     try:
         pdf_bytes = archivo_pdf.read()
@@ -64,7 +64,7 @@ if archivo_pdf is not None and archivo_docx is not None:
     palabras_sospechosas = []
     alertas_diseno = []
 
-    # A. Revisión y Marcado del Encabezado (Carpeta Obligatoria, Folio a pluma Libre)
+    # A. Revisión y Marcado del Encabezado
     for seccion in doc.sections:
         header = seccion.header
         if header:
@@ -96,13 +96,12 @@ if archivo_pdf is not None and archivo_docx is not None:
         txt_lower = txt.lower()
         texto_word_completo += " " + txt_lower
         
-        # Validar geografía básica
         if "ecatepec" in txt_lower:
             tiene_ecatepec = True
         if "iztapalapa" in txt_lower:
             tiene_iztapalapa = True
 
-        # --- AUDITORÍA DE TIPOGRAFÍA DE PLANTILLA (Raleway 9-11) ---
+        # --- AUDITORÍA DE TIPOGRAFÍA (Raleway 9-11) ---
         for run in parrafo.runs:
             if run.text.strip():
                 fuente = run.font.name
@@ -113,10 +112,8 @@ if archivo_pdf is not None and archivo_docx is not None:
                     errores_tipografia_cuenta += 1
                     alertas_diseno.append(f"⚠️ **Párrafo {i}:** Tipografía incorrecta. Asegúrate de usar Raleway de 9 a 11 puntos.")
 
-        # --- AUDITORÍA DE ALINEACIÓN CEÑIDA AL MANUAL (JUSTIFICADO Y CENTRADOS) ---
+        # --- AUDITORÍA DE ALINEACIÓN CEÑIDA AL MANUAL ---
         alineacion = parrafo.alignment
-        
-        # Palabras clave que el manual exige que vayan estrictamente CENTRADAS
         es_palabra_centrada = any(p_centrada in txt_lower for p_centrada in ["d i c t a m e n", "atentamente", "nombre y firma"])
         
         if es_palabra_centrada:
@@ -157,7 +154,7 @@ if archivo_pdf is not None and archivo_docx is not None:
     st.success("✅ ¡Auditoría de consistencia y control de formalidad completados!")
     st.divider()
 
-    # --- NUEVO APARTADO: DETECTOR DE ERRORES DE DISEÑO Y FORMALIDAD ---
+    # --- APARTADO: DETECTOR DE ERRORES DE DISEÑO Y FORMALIDAD ---
     st.subheader("📐 1. Reporte de Diseño y Formalidad del Documento")
     if alertas_diseno:
         st.warning(f"Se detectaron {len(alertas_diseno)} detalles de formato que incumplen la estructura oficial:")
@@ -206,3 +203,8 @@ if archivo_pdf is not None and archivo_docx is not None:
     if rubros_faltantes:
         st.error(f"❌ Faltan los siguientes rubros obligatorios en el Word: {', '.join(rubros_faltantes)}")
     else:
+        st.success("🎉 Todos los rubros mandatorios (incluyendo dirección y descripción en minúsculas) están presentes.")
+
+    st.divider()
+
+    # ------------------ BOTÓN DE DESCARGA SEGURA ------------------

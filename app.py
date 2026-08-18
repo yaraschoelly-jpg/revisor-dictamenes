@@ -1,3 +1,4 @@
+
 import streamlit as st
 import docx
 from docx.enum.text import WD_COLOR_INDEX
@@ -9,7 +10,7 @@ import io
 st.set_page_config(page_title="Revisor de Word Inteligente Pro", page_icon="📝", layout="centered")
 
 st.title("📝 Revisor de Dictámenes Periciales Pro")
-st.write("Prototipo avanzado: Validación de formato, rubros, ortografía e incongruencias globales de contenido (Ubicación y Nombres).")
+st.write("Prototipo avanzado: Validación de formato, rubros, ortografía e incongruencias globales de contenido con explicaciones.")
 
 # Lista de rubros base
 RUBROS_BASE = [
@@ -49,8 +50,11 @@ if archivo_subido is not None:
     tiene_ecatepec = False
     tiene_iztapalapa = False
     nombre_agente_inicio = ""
+    
+    # Listas para almacenar mensajes explicativos detallados
+    motivos_subrayado = []
 
-    # 1. REVISIÓN DEL ENCABEZADO (HEADER) - PRESERVANDO ALINEACIÓN ORIGINAL
+    # 1. REVISIÓN DEL ENCABEZADO (HEADER)
     for seccion in doc.sections:
         header = seccion.header
         if header:
@@ -102,7 +106,7 @@ if archivo_subido is not None:
             if not nombre_agente_inicio:
                 nombre_agente_inicio = txt_lower
 
-    # 3. SEGUNDA PASADA: APLICAR RESALTADOS DIRECTOS EN LOS RUNS DE WORD
+    # 3. SEGUNDA PASADA: APLICAR RESALTADOS DIRECTOS Y REGISTRAR MOTIVOS EXPLICATIVOS
     for i, parrafo in enumerate(doc.paragraphs, start=1):
         texto_original = parrafo.text
         texto_lower = texto_original.lower()
@@ -110,19 +114,20 @@ if archivo_subido is not None:
             continue
 
         # --- VALIDACIÓN GLOBAL 1: INCONGRUENCIA GEOGRÁFICA ---
-        # Si el documento tiene ambas ubicaciones, pintamos de amarillo los renglones que arrastren el dato de Iztapalapa
         if tiene_ecatepec and tiene_iztapalapa and "iztapalapa" in texto_lower:
             for run in parrafo.runs:
                 run.font.highlight_color = WD_COLOR_INDEX.YELLOW
             errores_congruencia_cuenta += 1
+            # Añadir explicación con fragmento de texto real
+            motivos_subrayado.append(f"❌ **Subrayado por Contradicción Geográfica:** El párrafo que dice *\"{texto_original[:90]}...\"* menciona **Iztapalapa**, lo cual contradice la ubicación de **Ecatepec** declarada en el cuerpo del Dictamen.")
 
         # --- VALIDACIÓN GLOBAL 2: MUTACIÓN DE NOMBRE DE AUTORIDAD ---
         if "ramírez" in texto_lower or "tentle" in texto_lower:
-            # Si el orden de los apellidos mutó en las observaciones respecto al inicio del documento
             if "ramírez tentle maría" in texto_lower and "maría del rocio" in nombre_agente_inicio:
                 for run in parrafo.runs:
                     run.font.highlight_color = WD_COLOR_INDEX.YELLOW
                 errores_congruencia_cuenta += 1
+                motivos_subrayado.append(f"❌ **Subrayado por Alteración de Identidad:** En el párrafo *\"{texto_original[:90]}...\"* cambiaste el orden de los apellidos de la autoridad respecto a cómo la presentaste originalmente en el exordio.")
 
         # --- REVISIÓN DE DISEÑO GENERAL (Raleway 9 a 11) ---
         for run in parrafo.runs:
@@ -144,18 +149,20 @@ if archivo_subido is not None:
     st.success("✅ ¡Auditoría de consistencia completada!")
     st.divider()
     
-    # ------------------ REPORTES EN PANTALLA ------------------
-    st.subheader("📊 Alertas de Contenido e Incongruencias")
+    # ------------------ NUEVO APARTADO VISUAL: EXPLICACIÓN DE SUBRAYADOS ------------------
+    st.subheader("🕵️‍♂️ 1. Motivos de los Subrayados Amarillos")
     
-    if errores_congruencia_cuenta > 0:
-        st.error(f"❌ Se detectaron contradicciones de contenido en la redacción del dictamen.")
-        if tiene_ecatepec and tiene_iztapalapa:
-            st.write("👉 **Falla Geográfica Detectada:** El texto menciona simultáneamente 'Ecatepec' e 'Iztapalapa' (Error de arrastre de plantilla).")
-        if "ramírez tentle maría" in texto_completo:
-            st.write("👉 **Falla de Identidad Detectada:** El orden de los apellidos de la autoridad varía a lo largo de las hojas.")
+    if motivos_subrayado:
+        st.warning(f"Se realizaron {len(motivos_subrayado)} marcados por incongruencia de contenido:")
+        for motivo in set(motivos_subrayado): # Evitar duplicados en pantalla
+            st.markdown(motivo)
     else:
-        st.success("🎉 ¡Excelente! No se encontraron contradicciones de texto entre las secciones.")
+        st.success("🎉 ¡Excelente! No fue necesario subrayar párrafos por contradicciones de redacción.")
 
+    st.divider()
+
+    # REPORTES NUMÉRICOS EN PANTALLA
+    st.subheader("📊 Resumen de Alertas Generales")
     col1, col2, col3 = st.columns(3)
     with col1:
         st.metric("Campos Vacíos Encabezado", errores_encabezado_cuenta)

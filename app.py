@@ -87,7 +87,7 @@ if archivo_pdf is not None and archivo_docx is not None:
                             run.font.highlight_color = WD_COLOR_INDEX.YELLOW
                         errores_encabezado_cuenta += 1
 
-    # B. Revisión del Cuerpo y CORRECCIÓN ABSOLUTA DE ENCOMILLADO
+    # B. Revisión del Cuerpo, Incongruencias y Corrección de Encomillado
     tiene_ecatepec = False
     tiene_iztapalapa = False
 
@@ -104,27 +104,26 @@ if archivo_pdf is not None and archivo_docx is not None:
             tiene_iztapalapa = True
 
         # --- CORRECCIÓN INTEGRAL DE CITAS DE PLANTILLA ---
-        # Si tiene cualquier rastro de puntos suspensivos o marcas cortadas entre paréntesis
-        if any(marca in txt for marca in ["(...)", "(_)", "( … )", "(_ )"]):
-            # 1. Limpiamos y removemos los residuos de la plantilla corrupta
-            texto_limpio = re.sub(r'\(\.\.\.\)|\(_\)|\( … \)|\(_ \)', '', txt)
+        if any(marca in txt for marca in ["(...)", "(_)", "( … )", "(_ )", "(_.)"]):
+            texto_limpio = re.sub(r'\(\.\.\.\)|\(_\)|\( … \)|\(_ \)|\(_\.\)', '', txt)
             
-            # 2. Reestructurar las comillas de la cita de forma limpia y compacta
             if "dice:" in texto_limpio:
                 partes = texto_limpio.split("dice:")
-                # Extraemos el texto citado quitando comillas previas deformadas
+                cita_pura = partes[1].strip().strip('"').strip('“').strip('”').strip()
+                texto_final = f"{partes[0]}dice: \"{cita_pura}\""
+            elif "dice :" in texto_limpio:
+                partes = texto_limpio.split("dice :")
                 cita_pura = partes[1].strip().strip('"').strip('“').strip('”').strip()
                 texto_final = f"{partes[0]}dice: \"{cita_pura}\""
             else:
                 texto_final = texto_limpio
 
-            # 3. Inyectar el cambio físico en el documento Word
             parrafo.text = texto_final
             for run in parrafo.runs:
                 run.font.highlight_color = WD_COLOR_INDEX.YELLOW
                 
             errores_encomillado_cuenta += 1
-            alertas_encomillado.append(f"✅ **Párrafo {i}:** Se reestructuró la cita eliminando los residuos e insertando comillas válidas `\"`.")
+            alertas_encomillado.append(f"✅ **Párrafo {i}:** Se reestructuró la cita eliminando los residuos de plantilla.")
 
         # VALIDACIÓN DEL OFICIO
         if "antecedente" in txt_lower or "oficio número" in txt_lower or "oficio numero" in txt_lower:
@@ -216,4 +215,3 @@ if archivo_pdf is not None and archivo_docx is not None:
         file_name="DICTAMEN_REVISADO_OFICIAL.docx",
         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
-else:

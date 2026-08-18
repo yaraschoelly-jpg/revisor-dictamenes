@@ -120,15 +120,12 @@ if archivo_pdf is not None and archivo_docx is not None:
         es_palabra_centrada = any(p_centrada in txt_lower for p_centrada in ["d i c t a m e n", "atentamente", "nombre y firma"])
         
         if es_palabra_centrada:
-            # Si no está centrada (Alineación 1 en Word OpenXML representa Center)
             if alineacion != WD_ALIGN_PARAGRAPH.CENTER:
                 for run in parrafo.runs:
                     run.font.highlight_color = WD_COLOR_INDEX.YELLOW
                 errores_centrado_cuenta += 1
                 alertas_diseno.append(f"❌ **Párrafo {i}:** El rubro *'{txt}'* debe ir estrictamente **CENTRADO** según el formato oficial.")
         else:
-            # Párrafos ordinarios del cuerpo: El manual exige que vayan JUSTIFICADOS
-            # Ignoramos títulos fijos muy cortos que funcionen como rubros estructurados
             if len(txt) > 40 and alineacion != WD_ALIGN_PARAGRAPH.JUSTIFY:
                 for run in parrafo.runs:
                     run.font.highlight_color = WD_COLOR_INDEX.YELLOW
@@ -152,7 +149,7 @@ if archivo_pdf is not None and archivo_docx is not None:
                 run.font.highlight_color = WD_COLOR_INDEX.YELLOW
             errores_congruencia_cuenta += 1
 
-        # Alerta Ortográfica de nombres propios (Roció vs Rocío)
+        # Alerta Ortográfica de nombres propios
         if "rocio" in txt_lower and ("maritza" in txt_lower or "ramírez" in txt_lower):
             if "roció" in txt_lower or "rocio" in txt_lower:
                 palabras_sospechosas.append(txt)
@@ -164,7 +161,6 @@ if archivo_pdf is not None and archivo_docx is not None:
     st.subheader("📐 1. Reporte de Diseño y Formalidad del Documento")
     if alertas_diseno:
         st.warning(f"Se detectaron {len(alertas_diseno)} detalles de formato que incumplen la estructura oficial:")
-        # Mostrar las alertas de diseño de forma limpia y ordenada (máximo 10 para no saturar)
         for alerta in list(set(alertas_diseno))[:10]:
             st.markdown(alerta)
     else:
@@ -202,3 +198,11 @@ if archivo_pdf is not None and archivo_docx is not None:
     texto_completo_limpio = texto_word_completo.replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
     
     for rubro in RUBROS_BASE:
+        rubro_limpio = rubro.replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
+        patron = rf"{rubro_limpio}(es|s)?\b"
+        if not re.search(patron, texto_completo_limpio):
+            rubros_faltantes.append(rubro.upper())
+
+    if rubros_faltantes:
+        st.error(f"❌ Faltan los siguientes rubros obligatorios en el Word: {', '.join(rubros_faltantes)}")
+    else:

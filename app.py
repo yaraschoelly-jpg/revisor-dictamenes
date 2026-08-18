@@ -104,18 +104,13 @@ if archivo_pdf is not None and archivo_docx is not None:
             tiene_iztapalapa = True
 
         # --- CORRECCIÓN FÍSICA AUTOMÁTICA DE ENCOMILLADO ---
-        # Si el párrafo tiene indicios de citas rotas o marcas de plantilla erróneas
-        if any(marca in txt for i, marca in enumerate(["(...)", "(_)", "( … )", "(_ )"])):
-            # Limpiamos los elementos XML del párrafo para reescribirlo de forma segura e impecable
+        if any(marca in txt for marca in ["(...)", "(_)", "( … )", "(_ )"]):
             texto_corregido = txt
-            # Eliminamos los paréntesis corruptos de plantilla
             texto_corregido = re.sub(r'\(\.\.\.\)|\(_\)|\( … \)|\(_ \)', '', texto_corregido)
             
-            # Buscamos el texto que está después de los dos puntos de la cita
             if "dice:" in texto_corregido:
                 partes = texto_corregido.split("dice:")
                 frase_citada = partes[1].strip().strip('"').strip('“').strip('”').strip()
-                # Unificamos con el formato correcto estricto: abre comilla y cierra comilla de forma limpia
                 texto_corregido = f"{partes[0]}dice: \"{frase_citada}\""
             
             parrafo.text = texto_corregido
@@ -215,3 +210,4 @@ if archivo_pdf is not None and archivo_docx is not None:
         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
 else:
+    st.warning("💡 Por favor, sube **ambos archivos** (el PDF del Oficio y el Word de tu Dictamen) para iniciar la auditoría cruzada.")

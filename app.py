@@ -145,7 +145,7 @@ if archivo_pdf is not None and archivo_docx is not None:
                 if parrafo.runs:
                     parrafo.runs[-1].text += " [⚠️ CONTRADICCIÓN DE PLANTILLA: Tu Estudio de Campo declara Ecatepec, no Iztapalapa.]"
                 else:
-                    doc.paragraphs[i-1].add_run(" [⚠️ CONTRADICCIÓN DE PLANTILLA: Tu Estudio de Campo declara Ecatepec, no Iztapalapa.]")
+                    parrafo.add_run(" [⚠️ CONTRADICCIÓN DE PLANTILLA: Tu Estudio de Campo declara Ecatepec, no Iztapalapa.]")
                 for run in parrafo.runs:
                     run.font.highlight_color = WD_COLOR_INDEX.YELLOW
                 errores_congruencia_cuenta += 1
@@ -207,3 +207,5 @@ if archivo_pdf is not None and archivo_docx is not None:
             rubros_faltantes.append(rubro.upper())
 
     if rubros_faltantes:
+
+ 

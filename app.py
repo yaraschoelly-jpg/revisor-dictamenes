@@ -28,7 +28,7 @@ with col_docx:
 if archivo_pdf is not None and archivo_docx is not None:
     st.info("🔍 Ejecutando auditoría de consistencia y control de citas... Por favor, espera.")
     
-    # --- 1. EXTRACCIÓN DE TEXTO DEL PDF MEDIANTE LECTURA BINARIA LIGERA ---
+    # --- 1. EXTRACCIÓN DE TEXTO DEL PDF ---
     texto_pdf = ""
     try:
         pdf_bytes = archivo_pdf.read()
@@ -62,7 +62,7 @@ if archivo_pdf is not None and archivo_docx is not None:
     palabras_sospechosas = []
     alertas_encomillado = []
 
-    # A. Revisión y Marcado del Encabezado (Carpeta Obligatoria, Folio Libre)
+    # A. Revisión y Marcado del Encabezado
     for seccion in doc.sections:
         header = seccion.header
         if header:
@@ -103,15 +103,13 @@ if archivo_pdf is not None and archivo_docx is not None:
         if "iztapalapa" in txt_lower:
             tiene_iztapalapa = True
 
-        # --- VALIDACIÓN EXCLUSIVA: CONTROL DE ENCOMILLADO EN TODO EL DOCUMENTO ---
-        # 1. Detectar si arrastra marcas de plantilla prohibidas de comillas cortadas como (...) o (_)
+        # --- VALIDACIÓN: CONTROL DE ENCOMILLADO EN TODO EL DOCUMENTO ---
         if "(...)" in txt or "(_)" in txt or "( … )" in txt:
             for run in parrafo.runs:
                 run.font.highlight_color = WD_COLOR_INDEX.YELLOW
             errores_encomillado_cuenta += 1
             alertas_encomillado.append(f"❌ **Párrafo {i}:** Contiene marcas de plantilla erróneas como `(...)`. Debe abrir con `\" ` y cerrar con ` \"`.")
 
-        # 2. Detectar si hay comillas impares (Cita abierta que olvidaste cerrar en la redacción)
         cuenta_comillas = txt.count('"') + txt.count('“') + txt.count('”')
         if cuenta_comillas % 2 != 0:
             for run in parrafo.runs:
@@ -119,14 +117,14 @@ if archivo_pdf is not None and archivo_docx is not None:
             errores_encomillado_cuenta += 1
             alertas_encomillado.append(f"❌ **Párrafo {i}:** Se detectó una cita con comillas impares. Asegúrate de cerrar correctamente la frase encomillada.")
 
-        # VALIDACIÓN DEL OFICIO: Comparar la transcripción del texto libre contra el PDF oficial
+        # VALIDACIÓN DEL OFICIO
         if "antecedente" in txt_lower or "oficio número" in txt_lower or "oficio numero" in txt_lower:
             if oficio_solicitud.lower() not in txt_lower and "fgr" in txt_lower:
                 for run in parrafo.runs:
                     run.font.highlight_color = WD_COLOR_INDEX.YELLOW
                 errores_antecedentes_cuenta += 1
 
-        # Marcar Contradicción Geográfica Directa (Ecatepec vs Iztapalapa)
+        # Marcar Contradicción Geográfica Directa
         if tiene_ecatepec and tiene_iztapalapa and "iztapalapa" in txt_lower and "[⚠️" not in txt:
             if parrafo.runs:
                 parrafo.runs[-1].text += " [⚠️ CONTRADICCIÓN DE PLANTILLA: Tu Estudio de Campo declara Ecatepec, no Iztapalapa.]"
@@ -136,7 +134,7 @@ if archivo_pdf is not None and archivo_docx is not None:
                 run.font.highlight_color = WD_COLOR_INDEX.YELLOW
             errores_congruencia_cuenta += 1
 
-        # Alerta Ortográfica de nombres propios por párrafo (Roció vs Rocío)
+        # Alerta Ortográfica de nombres propios
         if "rocio" in txt_lower and ("maritza" in txt_lower or "ramírez" in txt_lower):
             if "roció" in txt_lower or "rocio" in txt_lower:
                 palabras_sospechosas.append(txt)
@@ -144,10 +142,10 @@ if archivo_pdf is not None and archivo_docx is not None:
     st.success("✅ ¡Cruce pericial de datos y control de encomillado completados!")
     st.divider()
 
-    # --- NUEVO REPORTE EN PANTALLA: CONTROL DE CITAS ENCOMILLADAS ---
+    # --- REPORTE EN PANTALLA: CONTROL DE CITAS ENCOMILLADAS ---
     st.subheader("🖍️ 1. Reporte de Citas y Encomillado Obligatorio")
     if alertas_encomillado:
-        st.warning(f"Se detectaron {len(alertas_encomillado)} párrafos con citas mal estructuradas o errores de plantilla:")
+        st.warning(f"Se detectaron {len(alertas_encomillado)} párrafos con citas mal estructuradas:")
         for alerta in alertas_encomillado:
             st.markdown(alerta)
     else:
@@ -210,4 +208,6 @@ if archivo_pdf is not None and archivo_docx is not None:
         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
 else:
+    st.warning("💡 Por favor, sube **ambos archivos** (el PDF del Oficio y el Word de tu Dictamen) para iniciar la auditoría cruzada.")
+
 

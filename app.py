@@ -87,7 +87,7 @@ if archivo_pdf is not None and archivo_docx is not None:
                             run.font.highlight_color = WD_COLOR_INDEX.YELLOW
                         errores_encabezado_cuenta += 1
 
-    # B. Revisión del Cuerpo, Incongruencias y Corrección Automática de Encomillado
+    # B. Revisión del Cuerpo y CORRECCIÓN ABSOLUTA DE ENCOMILLADO
     tiene_ecatepec = False
     tiene_iztapalapa = False
 
@@ -103,21 +103,28 @@ if archivo_pdf is not None and archivo_docx is not None:
         if "iztapalapa" in txt_lower:
             tiene_iztapalapa = True
 
-        # --- CORRECCIÓN FÍSICA AUTOMÁTICA DE ENCOMILLADO ---
+        # --- CORRECCIÓN INTEGRAL DE CITAS DE PLANTILLA ---
+        # Si tiene cualquier rastro de puntos suspensivos o marcas cortadas entre paréntesis
         if any(marca in txt for marca in ["(...)", "(_)", "( … )", "(_ )"]):
-            texto_corregido = txt
-            texto_corregido = re.sub(r'\(\.\.\.\)|\(_\)|\( … \)|\(_ \)', '', texto_corregido)
+            # 1. Limpiamos y removemos los residuos de la plantilla corrupta
+            texto_limpio = re.sub(r'\(\.\.\.\)|\(_\)|\( … \)|\(_ \)', '', txt)
             
-            if "dice:" in texto_corregido:
-                partes = texto_corregido.split("dice:")
-                frase_citada = partes[1].strip().strip('"').strip('“').strip('”').strip()
-                texto_corregido = f"{partes[0]}dice: \"{frase_citada}\""
-            
-            parrafo.text = texto_corregido
+            # 2. Reestructurar las comillas de la cita de forma limpia y compacta
+            if "dice:" in texto_limpio:
+                partes = texto_limpio.split("dice:")
+                # Extraemos el texto citado quitando comillas previas deformadas
+                cita_pura = partes[1].strip().strip('"').strip('“').strip('”').strip()
+                texto_final = f"{partes[0]}dice: \"{cita_pura}\""
+            else:
+                texto_final = texto_limpio
+
+            # 3. Inyectar el cambio físico en el documento Word
+            parrafo.text = texto_final
             for run in parrafo.runs:
                 run.font.highlight_color = WD_COLOR_INDEX.YELLOW
+                
             errores_encomillado_cuenta += 1
-            alertas_encomillado.append(f"✅ **Párrafo {i}:** Se corrigió automáticamente el encomillado y se eliminaron las marcas `(...)`.")
+            alertas_encomillado.append(f"✅ **Párrafo {i}:** Se reestructuró la cita eliminando los residuos e insertando comillas válidas `\"`.")
 
         # VALIDACIÓN DEL OFICIO
         if "antecedente" in txt_lower or "oficio número" in txt_lower or "oficio numero" in txt_lower:
@@ -141,13 +148,13 @@ if archivo_pdf is not None and archivo_docx is not None:
             if "roció" in txt_lower or "rocio" in txt_lower:
                 palabras_sospechosas.append(txt)
 
-    st.success("✅ ¡Cruce pericial de datos y corrección automática completados!")
+    st.success("🎉 ¡Cruce de datos y corrección física de comillas completados!")
     st.divider()
 
-    # --- REPORTE EN PANTALLA: CONTROL DE CITAS ENCOMILLADAS ---
+    # --- REPORTE EN PANTALLA ---
     st.subheader("🖍️ 1. Reporte de Citas y Encomillado Obligatorio")
     if alertas_encomillado:
-        st.warning(f"Se reestructuraron {len(alertas_encomillado)} párrafos con errores de comillas en el Word:")
+        st.warning(f"Se corrigieron {len(alertas_encomillado)} párrafos de forma automática en el Word:")
         for alerta in alertas_encomillado:
             st.markdown(alerta)
     else:
@@ -210,4 +217,3 @@ if archivo_pdf is not None and archivo_docx is not None:
         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
 else:
-    st.warning("💡 Por favor, sube **ambos archivos** (el PDF del Oficio y el Word de tu Dictamen) para iniciar la auditoría cruzada.")

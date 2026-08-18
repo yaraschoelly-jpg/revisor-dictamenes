@@ -7,8 +7,8 @@ import io
 # Configuración de la interfaz web
 st.set_page_config(page_title="Auditor Pericial Cruzado", page_icon="⚖️", layout="centered")
 
-st.title("⚖️ Auditor Pericial de Dictámenes (Control de Oficio y Carpeta)")
-st.write("Sube el **PDF de Solicitud** y tu **Word del Dictamen**. El sistema validará que coincidan estrictamente la Carpeta y el Oficio transcrito, ignorando el folio a pluma.")
+st.title("⚖️ Auditor Pericial de Dictámenes (Validación de Encomillado)")
+st.write("Sube el **PDF de Solicitud** y tu **Word del Dictamen**. El sistema validará la Carpeta, el Oficio y revisará que **todas las citas del documento** estén correctamente encomilladas.")
 
 # Definición de los rubros mandatorios en el dictamen
 RUBROS_BASE = [
@@ -26,7 +26,7 @@ with col_docx:
     archivo_docx = st.file_uploader("Subir Dictamen Pericial en Word (.docx)", type=["docx"])
 
 if archivo_pdf is not None and archivo_docx is not None:
-    st.info("🔍 Ejecutando auditoría de cruce de datos institucionales... Por favor, espera.")
+    st.info("🔍 Ejecutando auditoría de consistencia y control de citas... Por favor, espera.")
     
     # --- 1. EXTRACCIÓN DE TEXTO DEL PDF MEDIANTE LECTURA BINARIA LIGERA ---
     texto_pdf = ""
@@ -43,7 +43,7 @@ if archivo_pdf is not None and archivo_docx is not None:
         
     texto_pdf_lower = texto_pdf.lower()
 
-    # --- 2. EXTRAER DATOS CLAVE DEL PDF MEJORADO ---
+    # --- 2. EXTRAER DATOS CLAVE DEL PDF ---
     match_carpeta_pdf = re.search(r'fed/[a-z0-9/_\-]+', texto_pdf_lower)
     carpeta_solicitud = match_carpeta_pdf.group(0).upper() if match_carpeta_pdf else "FED/FEVIMTRA/FEIDHVM-MEX/0000251/2026"
     
@@ -58,9 +58,11 @@ if archivo_pdf is not None and archivo_docx is not None:
     errores_encabezado_cuenta = 0
     errores_antecedentes_cuenta = 0
     errores_congruencia_cuenta = 0
+    errores_encomillado_cuenta = 0
     palabras_sospechosas = []
+    alertas_encomillado = []
 
-    # A. Revisión y Marcado del Encabezado (Carpeta Obligatoria, Folio a pluma Libre)
+    # A. Revisión y Marcado del Encabezado (Carpeta Obligatoria, Folio Libre)
     for seccion in doc.sections:
         header = seccion.header
         if header:
@@ -71,15 +73,12 @@ if archivo_pdf is not None and archivo_docx is not None:
                 texto_linea_lower = texto_linea.lower()
                 texto_header_completo += " " + texto_linea_lower
 
-                # Ignorar títulos oficiales de la institución
                 if any(t in texto_linea_lower for t in ["agencia", "centro federal", "unidad de", "especialidad"]):
                     continue
 
-                # REGLA DEL FOLIO MODIFICADA: Al venir a mano con pluma, ya no se evalúa ni se pinta de amarillo
                 if "folio" in texto_linea_lower:
                     continue
 
-                # Validar Carpeta en Encabezado contra el PDF (Sigue estricto)
                 elif "carpeta" in texto_linea_lower:
                     digitos_carpeta = "".join(re.findall(r'\d+', carpeta_solicitud))
                     if not any(d in texto_linea_lower for d in digitos_carpeta[:4]):
@@ -88,11 +87,11 @@ if archivo_pdf is not None and archivo_docx is not None:
                             run.font.highlight_color = WD_COLOR_INDEX.YELLOW
                         errores_encabezado_cuenta += 1
 
-    # B. Revisión de los Antecedentes e Incongruencias en el Cuerpo
+    # B. Revisión del Cuerpo, Incongruencias y Control de Encomillado
     tiene_ecatepec = False
     tiene_iztapalapa = False
 
-    for parrafo in doc.paragraphs:
+    for i, parrafo in enumerate(doc.paragraphs, start=1):
         txt = parrafo.text.strip()
         if not txt:
             continue
@@ -103,6 +102,22 @@ if archivo_pdf is not None and archivo_docx is not None:
             tiene_ecatepec = True
         if "iztapalapa" in txt_lower:
             tiene_iztapalapa = True
+
+        # --- VALIDACIÓN EXCLUSIVA: CONTROL DE ENCOMILLADO EN TODO EL DOCUMENTO ---
+        # 1. Detectar si arrastra marcas de plantilla prohibidas de comillas cortadas como (...) o (_)
+        if "(...)" in txt or "(_)" in txt or "( … )" in txt:
+            for run in parrafo.runs:
+                run.font.highlight_color = WD_COLOR_INDEX.YELLOW
+            errores_encomillado_cuenta += 1
+            alertas_encomillado.append(f"❌ **Párrafo {i}:** Contiene marcas de plantilla erróneas como `(...)`. Debe abrir con `\" ` y cerrar con ` \"`.")
+
+        # 2. Detectar si hay comillas impares (Cita abierta que olvidaste cerrar en la redacción)
+        cuenta_comillas = txt.count('"') + txt.count('“') + txt.count('”')
+        if cuenta_comillas % 2 != 0:
+            for run in parrafo.runs:
+                run.font.highlight_color = WD_COLOR_INDEX.YELLOW
+            errores_encomillado_cuenta += 1
+            alertas_encomillado.append(f"❌ **Párrafo {i}:** Se detectó una cita con comillas impares. Asegúrate de cerrar correctamente la frase encomillada.")
 
         # VALIDACIÓN DEL OFICIO: Comparar la transcripción del texto libre contra el PDF oficial
         if "antecedente" in txt_lower or "oficio número" in txt_lower or "oficio numero" in txt_lower:
@@ -126,37 +141,46 @@ if archivo_pdf is not None and archivo_docx is not None:
             if "roció" in txt_lower or "rocio" in txt_lower:
                 palabras_sospechosas.append(txt)
 
-    st.success("✅ ¡Cruce pericial de datos completado!")
+    st.success("✅ ¡Cruce pericial de datos y control de encomillado completados!")
     st.divider()
 
-    # --- REPORTES EN PANTALLA ---
-    st.subheader("🕵️‍♂️ 1. Resultados de Validación Cruzada (PDF vs. Word)")
-    
-    # Cuadro informativo limpio para el usuario
+    # --- NUEVO REPORTE EN PANTALLA: CONTROL DE CITAS ENCOMILLADAS ---
+    st.subheader("🖍️ 1. Reporte de Citas y Encomillado Obligatorio")
+    if alertas_encomillado:
+        st.warning(f"Se detectaron {len(alertas_encomillado)} párrafos con citas mal estructuradas o errores de plantilla:")
+        for alerta in alertas_encomillado:
+            st.markdown(alerta)
+    else:
+        st.success("🎉 ¡Excelente! Todas las citas textuales del documento abren y cierran formalmente con comillas válidas.")
+
+    st.divider()
+
+    # --- REPORTES EN PANTALLA DE CONSISTENCIA ---
+    st.subheader("🕵️‍♂️ 2. Resultados de Validación Cruzada (PDF vs. Word)")
     col_pdf1, col_pdf2 = st.columns(2)
     with col_pdf1:
         st.info(f"📄 **Oficio de Solicitud en PDF:** {oficio_solicitud}")
     with col_pdf2:
         st.info(f"📂 **Carpeta de Investigación en PDF:** {carpeta_solicitud}")
 
-    if errores_encabezado_cuenta > 0 or errores_antecedentes_cuenta > 0:
+    if errores_antecedentes_cuenta > 0 or errores_encabezado_cuenta > 0:
         if errores_antecedentes_cuenta > 0:
-            st.error(f"❌ **Error en Antecedentes:** El número de Oficio transcrito en el cuerpo del dictamen no coincide con el del PDF oficial (**{oficio_solicitud}**).")
+            st.error(f"❌ **Error en Antecedentes:** El número de Oficio transcrito en tu dictamen no coincide con el del PDF oficial (**{oficio_solicitud}**).")
         if errores_encabezado_cuenta > 0:
             st.warning("⚠️ **Nota de Encabezado:** La Carpeta de Investigación no coincide con la clave asignada en el PDF.")
     else:
-        st.success("🎉 ¡Excelente! La Carpeta de Investigación y el Oficio transcrito en la sección de antecedentes coinciden perfectamente con el PDF.")
+        st.success("🎉 La Carpeta de Investigación y el Oficio transcrito en antecedentes coinciden perfectamente con la Solicitud.")
 
     # REPORTE DE ORTOGRAFÍA
-    st.subheader("📝 2. Reporte de Corrección Ortográfica y Acentuación")
+    st.subheader("📝 3. Reporte de Corrección Ortográfica y Acentuación")
     if palabras_sospechosas:
         st.warning("Se detectaron detalles de acentuación críticos en nombres propios:")
         st.markdown(f"* En tus párrafos de redacción escribiste **'Roció'** de forma incorrecta. La forma oficial es **'Rocío'** (con acento en la 'í').")
     else:
-        st.success("🎉 ¡Excelente! No se detectaron faltas de ortografía evidentes en los nombres del personal.")
+        st.success("🎉 ¡Excelente! No se detectaron faltas de ortografía en los nombres del personal.")
 
     # Verificar presencia de Rubros Obligatorios
-    st.subheader("📋 3. Control de Rubros Estructurados")
+    st.subheader("📋 4. Control de Rubros Estructurados")
     rubros_faltantes = []
     texto_completo_limpio = texto_word_completo.replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
     
@@ -186,4 +210,4 @@ if archivo_pdf is not None and archivo_docx is not None:
         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
 else:
-    st.warning("💡 Por favor, sube **ambos archivos** (el PDF del Oficio y el Word de tu Dictamen) para iniciar la auditoría cruzada.")
+

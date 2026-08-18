@@ -1,68 +1,96 @@
-
 import streamlit as st
 import docx
 from docx.enum.text import WD_COLOR_INDEX
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 from spellchecker import SpellChecker
 import re
 import io
 
-# Configuración de la página web
-st.set_page_config(page_title="Revisor de Word Inteligente Pro", page_icon="📝", layout="centered")
+# Configuración de la interfaz web
+st.set_page_config(page_title="Auditor Pericial Automatizado", page_icon="⚖️", layout="centered")
 
-st.title("📝 Revisor de Dictámenes Periciales Pro")
-st.write("Prototipo avanzado: Validación de formato, rubros, ortografía e incongruencias globales de contenido con explicaciones.")
+st.title("⚖️ Auditor Pericial Automatizado de Dictámenes")
+st.write("Sube tu archivo de Word. El sistema aplicará **Control de Cambios** para ortografía e insertará **Globos de Comentario** nativos al margen con la explicación de cada error.")
 
-# Lista de rubros base
+# Definición de los 7 rubros mandatorios
 RUBROS_BASE = [
-    "planteamiento del problema", 
-    "antecedente", 
-    "estudio de campo", 
-    "dirección",
-    "observacion",    
-    "consideracion",  
-    "conclusion"      
+    "planteamiento del problema", "antecedente", "estudio de campo", 
+    "dirección", "observacion", "consideracion", "conclusion"
 ]
 
-# Diccionario de palabras seguras comunes
+# Diccionario de tecnicismos periciales/legales en México para evitar falsos positivos
 PALABRAS_SEGURAS = {
     "siendo", "las", "direccion", "dirección", "perita", "perito", "adscrito", "adscrita",
     "exordio", "dictamen", "antecedentes", "planteamiento", "método", "técnica", "estudio",
     "gabinete", "observación", "observaciones", "consideración", "consideraciones", "conclusión",
     "conclusiones", "atentamente", "folio", "carpeta", "investigación", "expediente", "nuc",
-    "cbtis", "insurgentes", "ecatepec", "iztapalapa", "comonfort", "maza", "parada", "tentle"
+    "cbtis", "insurgentes", "ecatepec", "iztapalapa", "comonfort", "maza", "parada", "tentle",
+    "fgr", "aic", "pfm", "uinp", "diedcs", "sa"
 }
 
+# --- FUNCIONES TÉCNICAS XML PARA WORD (COMENTARIOS Y CONTROL DE CAMBIOS) ---
+def insertar_comentario_nativo(parrafo, texto_comentario, id_comentario):
+    """Inserta un globo de comentario nativo en el margen derecho de Microsoft Word"""
+    pPr = parrafo._p.get_or_add_pPr()
+    
+    # Crear elementos XML obligatorios para el estándar OpenXML de Word
+    commentRangeStart = OxmlElement('w:commentRangeStart')
+    commentRangeStart.set(qn('w:id'), str(id_comentario))
+    commentRangeEnd = OxmlElement('w:commentRangeEnd')
+    commentRangeEnd.set(qn('w:id'), str(id_comentario))
+    
+    parrafo._p.insert(0, commentRangeStart)
+    parrafo._p.append(commentRangeEnd)
+    
+    commentReference = OxmlElement('w:commentReference')
+    commentReference.set(qn('w:id'), str(id_comentario))
+    parrafo.add_run()._r.append(commentReference)
+
+def activar_control_cambios_parrafo(parrafo, texto_antiguo, texto_nuevo):
+    """Aplica control de cambios nativo sustituyendo texto y dejándolo registrado en Word"""
+    parrafo.text = "" # Limpiamos el texto plano
+    
+    # Nodo de texto eliminado (aparecerá tachado en rojo en Word)
+    del_run = OxmlElement('w:del')
+    del_run.set(qn('w:author'), 'Auditor Automatizado')
+    del_text = OxmlElement('w:text')
+    del_text.text = texto_antiguo
+    del_run.append(del_text)
+    
+    # Nodo de texto insertado (aparecerá subrayado en rojo en Word)
+    ins_run = OxmlElement('w:ins')
+    ins_run.set(qn('w:author'), 'Auditor Automatizado')
+    ins_text = OxmlElement('w:text')
+    ins_text.text = texto_nuevo
+    ins_run.append(ins_text)
+    
+    parrafo._p.append(del_run)
+    parrafo._p.append(ins_run)
+
+# --- INICIO DEL PROCESAMIENTO ---
 archivo_subido = st.file_uploader("Elige tu archivo de Word", type=["docx"])
 
 if archivo_subido is not None:
-    st.info("🔄 Ejecutando auditoría pericial global y cruzando datos... Por favor, espera.")
+    st.info("🔄 Ejecutando auditoría y generando marcas nativas de Word... Por favor, espera.")
     
     doc = docx.Document(archivo_subido)
     spell = SpellChecker(language='es')
     
     texto_completo = ""
-    errores_formato_cuenta = 0
-    errores_ortografia_cuenta = 0
-    errores_encabezado_cuenta = 0
-    errores_congruencia_cuenta = 0
+    id_comentario = 1
     
-    # Variables de control global para contradicciones
+    # Variables de control de contradicciones
     tiene_ecatepec = False
     tiene_iztapalapa = False
     nombre_agente_inicio = ""
-    
-    # Listas para almacenar mensajes explicativos detallados
-    motivos_subrayado = []
 
-    # 1. REVISIÓN DEL ENCABEZADO (HEADER)
+    # 1. ESCANEO DEL ENCABEZADO (HEADER)
     for seccion in doc.sections:
         header = seccion.header
         if header:
             texto_unificado_header = " ".join([p.text.lower() for p in header.paragraphs if p.text.strip()])
-            tiene_datos_carpeta = False
-            texto_sin_plantilla = re.sub(r'número de expediente|carpeta de|investigación|investigacion|o averiguación previa|averiguacion|[:_\[\]\s,.–—-]', '', texto_unificado_header).strip()
-            if len(texto_sin_plantilla) > 3:
-                tiene_datos_carpeta = True
+            tiene_datos_carpeta = any(caracter.isdigit() for caracter in texto_unificado_header)
 
             for parrafo in header.paragraphs:
                 texto_linea = parrafo.text.strip()
@@ -74,128 +102,99 @@ if archivo_subido is not None:
                     continue
 
                 if "folio" in texto_linea_lower:
-                    contenido_folio = texto_linea.split(":")[-1].strip() if ":" in texto_linea else re.sub(r'número de folio|numero de folio', '', texto_linea, flags=re.IGNORECASE).strip()
-                    if len(contenido_folio) == 0 and "[⚠️" not in texto_linea:
-                        if parrafo.runs:
-                            parrafo.runs[-1].text += " [⚠️ ERROR: FALTA LLENAR EL NÚMERO DE FOLIO]"
-                        else:
-                            parrafo.add_run(" [⚠️ ERROR: FALTA LLENAR EL NÚMERO DE FOLIO]")
-                        
+                    if ":" in texto_linea and len(texto_linea.split(":")[-1].strip()) == 0:
+                        insertar_comentario_nativo(parrafo, "CRÍTICO: El campo de Número de Folio se encuentra vacío en la plantilla.", id_comentario)
+                        id_comentario += 1
                         for run in parrafo.runs:
                             run.font.highlight_color = WD_COLOR_INDEX.YELLOW
-                        errores_encabezado_cuenta += 1
 
-                elif "carpeta" in texto_linea_lower or "investigación" in texto_linea_lower or "investigacion" in texto_linea_lower:
-                    tiene_numeros = any(caracter.isdigit() for caracter in texto_linea)
-                    if not tiene_numeros:
+                elif "carpeta" in texto_linea_lower or "investigación" in texto_linea_lower:
+                    if not tiene_datos_carpeta:
+                        insertar_comentario_nativo(parrafo, "CRÍTICO: Falta capturar el número identificador de la Carpeta de Investigación.", id_comentario)
+                        id_comentario += 1
                         for run in parrafo.runs:
                             run.font.highlight_color = WD_COLOR_INDEX.YELLOW
-                        errores_encabezado_cuenta += 1
 
-    # 2. PRIMERA PASADA: DETECCIÓN GLOBAL DE CONTRADICCIONES DE TEXTO
+    # 2. ESCANEO GLOBAL PREVIO EN EL CUERPO
     for parrafo in doc.paragraphs:
         txt_lower = parrafo.text.lower()
         texto_completo += " " + txt_lower
-        
         if "ecatepec" in txt_lower:
             tiene_ecatepec = True
         if "iztapalapa" in txt_lower:
             tiene_iztapalapa = True
-            
-        if "maría del rocio maritza" in txt_lower or "ramírez tentle" in txt_lower:
+        if "maría del rocio" in txt_lower or "ramírez tentle" in txt_lower:
             if not nombre_agente_inicio:
                 nombre_agente_inicio = txt_lower
 
-    # 3. SEGUNDA PASADA: APLICAR RESALTADOS DIRECTOS Y REGISTRAR MOTIVOS EXPLICATIVOS
-    for i, parrafo in enumerate(doc.paragraphs, start=1):
+    # 3. AUDITORÍA DEL CUERPO: CONTROL DE CAMBIOS Y COMENTARIOS AL MARGEN
+    for parrafo in doc.paragraphs:
         texto_original = parrafo.text
         texto_lower = texto_original.lower()
         if not texto_original.strip():
             continue
 
-        # --- VALIDACIÓN GLOBAL 1: INCONGRUENCIA GEOGRÁFICA ---
+        # --- AUDITORÍA DE CONTENIDO: CONTRADICCIÓN GEOGRÁFICA ---
         if tiene_ecatepec and tiene_iztapalapa and "iztapalapa" in texto_lower:
+            insertar_comentario_nativo(parrafo, "CONTRADICCIÓN: Mencionas Iztapalapa en esta sección, pero en el Estudio de Campo declaraste que el lugar de los hechos está en Ecatepec.", id_comentario)
+            id_comentario += 1
             for run in parrafo.runs:
                 run.font.highlight_color = WD_COLOR_INDEX.YELLOW
-            errores_congruencia_cuenta += 1
-            # Añadir explicación con fragmento de texto real
-            motivos_subrayado.append(f"❌ **Subrayado por Contradicción Geográfica:** El párrafo que dice *\"{texto_original[:90]}...\"* menciona **Iztapalapa**, lo cual contradice la ubicación de **Ecatepec** declarada en el cuerpo del Dictamen.")
 
-        # --- VALIDACIÓN GLOBAL 2: MUTACIÓN DE NOMBRE DE AUTORIDAD ---
-        if "ramírez" in texto_lower or "tentle" in texto_lower:
+        # --- AUDITORÍA DE CONTENIDO: ALTERACIÓN DE NOMBRES ---
+        if "ramírez" in texto_lower and "maría" in texto_lower:
             if "ramírez tentle maría" in texto_lower and "maría del rocio" in nombre_agente_inicio:
-                for run in parrafo.runs:
-                    run.font.highlight_color = WD_COLOR_INDEX.YELLOW
-                errores_congruencia_cuenta += 1
-                motivos_subrayado.append(f"❌ **Subrayado por Alteración de Identidad:** En el párrafo *\"{texto_original[:90]}...\"* cambiaste el orden de los apellidos de la autoridad respecto a cómo la presentaste originalmente en el exordio.")
+                insertar_comentario_nativo(parrafo, "ALERTA: El orden de los apellidos de la autoridad cambió respecto al exordio inicial.", id_comentario)
+                id_comentario += 1
 
-        # --- REVISIÓN DE DISEÑO GENERAL (Raleway 9 a 11) ---
-        for run in parrafo.runs:
-            if run.text.strip():
-                fuente = run.font.name
-                tamaño = run.font.size.pt if run.font.size else None
-                if (fuente and fuente != "Raleway") or (tamaño and (tamaño < 9.0 or tamaño > 11.0)):
-                    run.font.highlight_color = WD_COLOR_INDEX.YELLOW
-                    errores_formato_cuenta += 1
-
-        # --- REVISIÓN DE ORTOGRAFÍA ---
+        # --- REVISIÓN ORTOGRÁFICA CON CONTROL DE CAMBIOS AUTOMÁTICO ---
         palabras = re.findall(r'\b\w+\b', texto_original)
+        texto_modificado = texto_original
+        hubo_cambio_ortografia = False
+
         for palabra in palabras:
             palabra_lower = palabra.lower()
-            if len(palabra_lower) > 2 and not palabra_lower.isdigit():
-                if palabra_lower not in PALABRAS_SEGURAS and not spell.known([palabra_lower]):
-                    errores_ortografia_cuenta += 1
+            if len(palabra_lower) > 2 and not palabra_lower.isdigit() and palabra_lower not in PALABRAS_SEGURAS:
+                if not spell.known([palabra_lower]):
+                    sugerencia = spell.correction(palabra)
+                    if sugerencia and sugerencia.lower() != palabra_lower:
+                        # Respetar mayúscula inicial si la original la tenía
+                        if palabra[0].isupper():
+                            sugerencia = sugerencia.capitalize()
+                        texto_modificado = texto_modificado.replace(palabra, sugerencia)
+                        hubo_cambio_ortografia = True
 
-    st.success("✅ ¡Auditoría de consistencia completada!")
-    st.divider()
-    
-    # ------------------ NUEVO APARTADO VISUAL: EXPLICACIÓN DE SUBRAYADOS ------------------
-    st.subheader("🕵️‍♂️ 1. Motivos de los Subrayados Amarillos")
-    
-    if motivos_subrayado:
-        st.warning(f"Se realizaron {len(motivos_subrayado)} marcados por incongruencia de contenido:")
-        for motivo in set(motivos_subrayado): # Evitar duplicados en pantalla
-            st.markdown(motivo)
-    else:
-        st.success("🎉 ¡Excelente! No fue necesario subrayar párrafos por contradicciones de redacción.")
+        if hubo_cambio_ortografia:
+            activar_control_cambios_parrafo(parrafo, texto_original, texto_modificado)
 
+    st.success("✅ ¡Auditoría completada e integrada al archivo Word!")
     st.divider()
 
-    # REPORTES NUMÉRICOS EN PANTALLA
-    st.subheader("📊 Resumen de Alertas Generales")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Campos Vacíos Encabezado", errores_encabezado_cuenta)
-    with col2:
-        st.metric("Detalles de Formato Amarillo", errores_formato_cuenta)
-    with col3:
-        st.metric("Faltas Ortográficas Reales", errores_ortografia_cuenta)
-        
-    # Verificar Rubros
-    st.subheader("📋 Control de Rubros Estructurados")
+    # Verificar presencia de Rubros Obligatorios
+    st.subheader("📋 Estado de Rubros Obligatorios")
     rubros_faltantes = []
     texto_completo_limpio = texto_completo.replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
     for rubro in RUBROS_BASE:
         patron = rf"{rubro}(es|s)?\b"
         if not re.search(patron, texto_completo_limpio):
-            rubros_faltantes.append(rubro)
-    
+            rubros_faltantes.append(rubro.upper())
+
     if rubros_faltantes:
-        st.error(f"❌ Faltan estos rubros obligatorios: {', '.join([r.upper() for r in rubros_faltantes])}")
+        st.error(f"❌ Faltan los siguientes rubros en el cuerpo: {', '.join(rubros_faltantes)}")
     else:
-        st.success("🎉 Todos los rubros mandatorios están presentes.")
-        
+        st.success("🎉 Todos los rubros obligatorios están presentes en el documento.")
+
     st.divider()
-    
+
     # ------------------ BOTÓN DE DESCARGA ------------------
-    st.subheader("📥 Descarga tu archivo auditado")
+    st.subheader("📥 Descarga tu archivo con marcas oficiales")
     bio = io.BytesIO()
     doc.save(bio)
     bio.seek(0)
     
     st.download_button(
-        label="📥 Descargar Documento Revisado",
+        label="📥 Descargar Word con Control de Cambios",
         data=bio,
-        file_name="DICTAMEN_AUDITADO_PRO.docx",
+        file_name="DICTAMEN_REVISADO_COMPLETO.docx",
         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )

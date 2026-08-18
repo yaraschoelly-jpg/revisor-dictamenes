@@ -1,22 +1,22 @@
 import streamlit as st
 import docx
-from docx.enum.text import WD_COLOR_INDEX
+from docx.enum.text import WD_COLOR_INDEX, WD_ALIGN_PARAGRAPH
 import re
 import io
 
 # Configuración de la interfaz web
-st.set_page_config(page_title="Auditor Pericial Cruzado", page_icon="⚖️", layout="centered")
+st.set_page_config(page_title="Auditor de Formalidad Pericial", page_icon="⚖️", layout="centered")
 
-st.title("⚖️ Auditor Pericial de Dictámenes (Validación de Encomillado)")
-st.write("Sube el **PDF de Solicitud** y tu **Word del Dictamen**. El sistema corregirá automáticamente el encomillado defectuoso en todo el documento.")
+st.title("⚖️ Auditor de Formalidad Estructural de Dictámenes")
+st.write("Sube el **PDF de Solicitud** y tu **Word del Dictamen**. El sistema validará la consistencia de datos y que la estructura, letra, justificado y centrados cumplan estrictamente el manual oficial.")
 
-# Definición de los rubros mandatorios en el dictamen
+# Lista de rubros obligatorios según el manual de la institución
 RUBROS_BASE = [
     "planteamiento del problema", "antecedente", "estudio de campo", 
     "dirección", "descripción del lugar", "observacion", "consideracion", "conclusion"
 ]
 
-# Diseño de casillas de doble carga seguras
+# Casillas de doble carga seguras
 st.subheader("📁 1. Carga de Documentos Oficiales")
 col_pdf, col_docx = st.columns(2)
 
@@ -26,9 +26,9 @@ with col_docx:
     archivo_docx = st.file_uploader("Subir Dictamen Pericial en Word (.docx)", type=["docx"])
 
 if archivo_pdf is not None and archivo_docx is not None:
-    st.info("🔍 Ejecutando auditoría de consistencia y corrección de citas... Por favor, espera.")
+    st.info("🔍 Ejecutando auditoría de consistencia de datos y control de diseño OpenXML... Por favor, espera.")
     
-    # --- 1. EXTRACCIÓN DE TEXTO DEL PDF ---
+    # --- 1. EXTRACCIÓN DE TEXTO DEL PDF MEDIANTE LECTURA BINARIA LIGERA ---
     texto_pdf = ""
     try:
         pdf_bytes = archivo_pdf.read()
@@ -50,19 +50,21 @@ if archivo_pdf is not None and archivo_docx is not None:
     match_oficio_pdf = re.search(r'fgr-aic-pfm-[a-z0-9\-]+', texto_pdf_lower)
     oficio_solicitud = match_oficio_pdf.group(0).upper() if match_oficio_pdf else "FGR-AIC-PFM-UINP-DIEDCS-SA-017608-2026"
 
-    # --- 3. EXTRACCIÓN Y AUDITORÍA EN EL WORD ---
+    # --- 3. EXTRACCIÓN Y AUDITORÍA DE FORMALIDAD EN EL WORD ---
     doc = docx.Document(archivo_docx)
     texto_word_completo = ""
-    texto_header_completo = ""
     
     errores_encabezado_cuenta = 0
     errores_antecedentes_cuenta = 0
     errores_congruencia_cuenta = 0
-    errores_encomillado_cuenta = 0
+    errores_justificado_cuenta = 0
+    errores_centrado_cuenta = 0
+    errores_tipografia_cuenta = 0
+    
     palabras_sospechosas = []
-    alertas_encomillado = []
+    alertas_diseno = []
 
-    # A. Revisión y Marcado del Encabezado
+    # A. Revisión y Marcado del Encabezado (Carpeta Obligatoria, Folio a pluma Libre)
     for seccion in doc.sections:
         header = seccion.header
         if header:
@@ -71,15 +73,11 @@ if archivo_pdf is not None and archivo_docx is not None:
                 if not texto_linea:
                     continue
                 texto_linea_lower = texto_linea.lower()
-                texto_header_completo += " " + texto_linea_lower
 
                 if any(t in texto_linea_lower for t in ["agencia", "centro federal", "unidad de", "especialidad"]):
                     continue
 
-                if "folio" in texto_linea_lower:
-                    continue
-
-                elif "carpeta" in texto_linea_lower:
+                if "carpeta" in texto_linea_lower:
                     digitos_carpeta = "".join(re.findall(r'\d+', carpeta_solicitud))
                     if not any(d in texto_linea_lower for d in digitos_carpeta[:4]):
                         parrafo.text = f"Carpeta de Investigación: [⚠️ ERROR: DEBE SER {carpeta_solicitud}]"
@@ -87,7 +85,7 @@ if archivo_pdf is not None and archivo_docx is not None:
                             run.font.highlight_color = WD_COLOR_INDEX.YELLOW
                         errores_encabezado_cuenta += 1
 
-    # B. Revisión del Cuerpo, Incongruencias y Corrección de Encomillado
+    # B. Revisión del Cuerpo: Consistencia, Justificado, Tipografía y Centrados
     tiene_ecatepec = False
     tiene_iztapalapa = False
 
@@ -98,34 +96,46 @@ if archivo_pdf is not None and archivo_docx is not None:
         txt_lower = txt.lower()
         texto_word_completo += " " + txt_lower
         
+        # Validar geografía básica
         if "ecatepec" in txt_lower:
             tiene_ecatepec = True
         if "iztapalapa" in txt_lower:
             tiene_iztapalapa = True
 
-        # --- CORRECCIÓN INTEGRAL DE CITAS DE PLANTILLA ---
-        if any(marca in txt for marca in ["(...)", "(_)", "( … )", "(_ )", "(_.)"]):
-            texto_limpio = re.sub(r'\(\.\.\.\)|\(_\)|\( … \)|\(_ \)|\(_\.\)', '', txt)
-            
-            if "dice:" in texto_limpio:
-                partes = texto_limpio.split("dice:")
-                cita_pura = partes[1].strip().strip('"').strip('“').strip('”').strip()
-                texto_final = f"{partes[0]}dice: \"{cita_pura}\""
-            elif "dice :" in texto_limpio:
-                partes = texto_limpio.split("dice :")
-                cita_pura = partes[1].strip().strip('"').strip('“').strip('”').strip()
-                texto_final = f"{partes[0]}dice: \"{cita_pura}\""
-            else:
-                texto_final = texto_limpio
-
-            parrafo.text = texto_final
-            for run in parrafo.runs:
-                run.font.highlight_color = WD_COLOR_INDEX.YELLOW
+        # --- AUDITORÍA DE TIPOGRAFÍA DE PLANTILLA (Raleway 9-11) ---
+        for run in parrafo.runs:
+            if run.text.strip():
+                fuente = run.font.name
+                tamaño = run.font.size.pt if run.font.size else None
                 
-            errores_encomillado_cuenta += 1
-            alertas_encomillado.append(f"✅ **Párrafo {i}:** Se reestructuró la cita eliminando los residuos de plantilla.")
+                if (fuente and fuente != "Raleway") or (tamaño and (tamaño < 9.0 or tamaño > 11.0)):
+                    run.font.highlight_color = WD_COLOR_INDEX.YELLOW
+                    errores_tipografia_cuenta += 1
+                    alertas_diseno.append(f"⚠️ **Párrafo {i}:** Tipografía incorrecta. Asegúrate de usar Raleway de 9 a 11 puntos.")
 
-        # VALIDACIÓN DEL OFICIO
+        # --- AUDITORÍA DE ALINEACIÓN CEÑIDA AL MANUAL (JUSTIFICADO Y CENTRADOS) ---
+        alineacion = parrafo.alignment
+        
+        # Palabras clave que el manual exige que vayan estrictamente CENTRADAS
+        es_palabra_centrada = any(p_centrada in txt_lower for p_centrada in ["d i c t a m e n", "atentamente", "nombre y firma"])
+        
+        if es_palabra_centrada:
+            # Si no está centrada (Alineación 1 en Word OpenXML representa Center)
+            if alineacion != WD_ALIGN_PARAGRAPH.CENTER:
+                for run in parrafo.runs:
+                    run.font.highlight_color = WD_COLOR_INDEX.YELLOW
+                errores_centrado_cuenta += 1
+                alertas_diseno.append(f"❌ **Párrafo {i}:** El rubro *'{txt}'* debe ir estrictamente **CENTRADO** según el formato oficial.")
+        else:
+            # Párrafos ordinarios del cuerpo: El manual exige que vayan JUSTIFICADOS
+            # Ignoramos títulos fijos muy cortos que funcionen como rubros estructurados
+            if len(txt) > 40 and alineacion != WD_ALIGN_PARAGRAPH.JUSTIFY:
+                for run in parrafo.runs:
+                    run.font.highlight_color = WD_COLOR_INDEX.YELLOW
+                errores_justificado_cuenta += 1
+                alertas_diseno.append(f"❌ **Párrafo {i}:** Este párrafo de texto libre no se encuentra **JUSTIFICADO**.")
+
+        # VALIDACIÓN DEL OFICIO EN ANTECEDENTES
         if "antecedente" in txt_lower or "oficio número" in txt_lower or "oficio numero" in txt_lower:
             if oficio_solicitud.lower() not in txt_lower and "fgr" in txt_lower:
                 for run in parrafo.runs:
@@ -142,26 +152,27 @@ if archivo_pdf is not None and archivo_docx is not None:
                 run.font.highlight_color = WD_COLOR_INDEX.YELLOW
             errores_congruencia_cuenta += 1
 
-        # Alerta Ortográfica de nombres propios
+        # Alerta Ortográfica de nombres propios (Roció vs Rocío)
         if "rocio" in txt_lower and ("maritza" in txt_lower or "ramírez" in txt_lower):
             if "roció" in txt_lower or "rocio" in txt_lower:
                 palabras_sospechosas.append(txt)
 
-    st.success("🎉 ¡Cruce de datos y corrección física de comillas completados!")
+    st.success("✅ ¡Auditoría de consistencia y control de formalidad completados!")
     st.divider()
 
-    # --- REPORTE EN PANTALLA ---
-    st.subheader("🖍️ 1. Reporte de Citas y Encomillado Obligatorio")
-    if alertas_encomillado:
-        st.warning(f"Se corrigieron {len(alertas_encomillado)} párrafos de forma automática en el Word:")
-        for alerta in alertas_encomillado:
+    # --- NUEVO APARTADO: DETECTOR DE ERRORES DE DISEÑO Y FORMALIDAD ---
+    st.subheader("📐 1. Reporte de Diseño y Formalidad del Documento")
+    if alertas_diseno:
+        st.warning(f"Se detectaron {len(alertas_diseno)} detalles de formato que incumplen la estructura oficial:")
+        # Mostrar las alertas de diseño de forma limpia y ordenada (máximo 10 para no saturar)
+        for alerta in list(set(alertas_diseno))[:10]:
             st.markdown(alerta)
     else:
-        st.success("🎉 ¡Excelente! Todas las citas textuales del documento abren y cierran formalmente con comillas válidas.")
+        st.success("🎉 ¡Excelente formalidad! El tipo de letra, los márgenes justificados y los títulos centrados cumplen perfectamente con la estructura del manual.")
 
     st.divider()
 
-    # --- REPORTES EN PANTALLA DE CONSISTENCIA ---
+    # --- REPORTES EN PANTALLA DE CONSISTENCIA DE DATOS ---
     st.subheader("🕵️‍♂️ 2. Resultados de Validación Cruzada (PDF vs. Word)")
     col_pdf1, col_pdf2 = st.columns(2)
     with col_pdf1:
@@ -191,27 +202,3 @@ if archivo_pdf is not None and archivo_docx is not None:
     texto_completo_limpio = texto_word_completo.replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
     
     for rubro in RUBROS_BASE:
-        rubro_limpio = rubro.replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
-        patron = rf"{rubro_limpio}(es|s)?\b"
-        if not re.search(patron, texto_completo_limpio):
-            rubros_faltantes.append(rubro.upper())
-
-    if rubros_faltantes:
-        st.error(f"❌ Faltan los siguientes rubros obligatorios en el Word: {', '.join(rubros_faltantes)}")
-    else:
-        st.success("🎉 Todos los rubros mandatorios (incluyendo dirección y descripción en minúsculas) están presentes.")
-
-    st.divider()
-
-    # ------------------ BOTÓN DE DESCARGA SEGURA ------------------
-    st.subheader("📥 Descarga tu archivo marcado")
-    bio = io.BytesIO()
-    doc.save(bio)
-    bio.seek(0)
-    
-    st.download_button(
-        label="📥 Descargar Documento Revisado",
-        data=bio,
-        file_name="DICTAMEN_REVISADO_OFICIAL.docx",
-        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    )

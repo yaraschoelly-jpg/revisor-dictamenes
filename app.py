@@ -207,3 +207,4 @@ if archivo_pdf is not None and archivo_docx is not None:
             rubros_faltantes.append(rubro.upper())
 
     if rubros_faltantes:
+

@@ -140,7 +140,7 @@ if archivo_pdf is not None and archivo_docx is not None:
                         run.font.highlight_color = WD_COLOR_INDEX.YELLOW
                     errores_antecedentes_cuenta += 1
 
-            # Marcar Contradicción Geográfica Directa
+            # Marcar Contradicción Geográfica Direct
             if tiene_ecatepec and tiene_iztapalapa and "iztapalapa" in txt_lower and "[⚠️" not in txt:
                 if parrafo.runs:
                     parrafo.runs[-1].text += " [⚠️ CONTRADICCIÓN DE PLANTILLA: Tu Estudio de Campo declara Ecatepec, no Iztapalapa.]"

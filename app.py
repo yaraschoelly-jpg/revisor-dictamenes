@@ -206,5 +206,4 @@ if archivo_pdf is not None and archivo_docx is not None:
         if not re.search(patron, texto_completo_limpio):
             rubros_faltantes.append(rubro.upper())
 
-    if rubros_faltantes:
-
+    if len(rubros_faltantes) > 0:

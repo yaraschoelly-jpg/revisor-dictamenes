@@ -22,8 +22,7 @@ col_pdf, col_docx = st.columns(2)
 
 with col_pdf:
     archivo_pdf = st.file_uploader("Subir Oficio de Solicitud (PDF)", type=["pdf"])
-with col_docx:
-    archivo_docx = st.file_uploader("Subir Dictamen Pericial en Word (.docx)", type=["docx"])
+with col_docx = st.file_uploader("Subir Dictamen Pericial en Word (.docx)", type=["docx"])
 
 if archivo_pdf is not None and archivo_docx is not None:
     st.info("🔍 Ejecutando auditoría de consistencia de datos y control de diseño OpenXML... Por favor, espera.")
@@ -195,15 +194,13 @@ if archivo_pdf is not None and archivo_docx is not None:
     else:
         st.success("🎉 ¡Excelente! No se detectaron faltas de ortografía en los nombres del personal.")
 
-    # Verificar presencia de Rubros Obligatorios
+    # Verificar presencia de Rubros Obligatorios (Acomodado de forma segura)
     st.subheader("📋 4. Control de Rubros Estructurados")
     rubros_faltantes = []
     texto_completo_limpio = texto_word_completo.replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
-    
     for rubro in RUBROS_BASE:
         rubro_limpio = rubro.replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
         patron = rf"{rubro_limpio}(es|s)?\b"
         if not re.search(patron, texto_completo_limpio):
             rubros_faltantes.append(rubro.upper())
-
-    if len(rubros_faltantes) > 0:
+    

@@ -8,7 +8,7 @@ import io
 st.set_page_config(page_title="Auditor de Formalidad Pericial", page_icon="⚖️", layout="centered")
 
 st.title("⚖️ Auditor de Formalidad Estructural de Dictámenes")
-st.write("Sube el **PDF de Solicitud** y tu **Word del Dictamen**. El sistema validará la consistencia de datos y aplicará las marcas de color directamente en el archivo descargable.")
+st.write("Registra los datos oficiales del Oficio de solicitud y sube tu **Dictamen en Word**. El sistema aplicará las marcas de color foforito directamente en el archivo descargable.")
 
 # Lista de rubros obligatorios según el manual de la institución
 RUBROS_BASE = [
@@ -16,39 +16,23 @@ RUBROS_BASE = [
     "dirección", "descripción del lugar", "observacion", "consideracion", "conclusion"
 ]
 
-# Casillas de doble carga seguras
-st.subheader("📁 1. Carga de Documentos Oficiales")
-col_pdf, col_docx = st.columns(2)
+# --- NUEVA INTERFAZ SEGURA DE ENTRADA MANUAL DE DATOS ---
+st.subheader("📋 1. Registro de Datos Oficiales de la Solicitud")
+col_dat1, col_det2 = st.columns(2)
 
-with col_pdf:
-    archivo_pdf = st.file_uploader("Subir Oficio de Solicitud (PDF)", type=["pdf"])
-with col_docx:
-    archivo_docx = st.file_uploader("Subir Dictamen Pericial en Word (.docx)", type=["docx"])
+with col_dat1:
+    oficio_oficial_input = st.text_input("Número de Oficio Oficial (Ej: FGR-AIC-PFM-...)", value="FGR-AIC-PFM-UINP-DIEDCS-SA-017608-2026").strip()
+with col_det2:
+    carpeta_oficial_input = st.text_input("Carpeta de Investigación (Ej: FED/FEVIMTRA/...)", value="FED/FEVIMTRA/FEIDHVM-MEX/0000251/2026").strip()
 
-if archivo_pdf is not None and archivo_docx is not None:
-    st.info("🔍 Ejecutando auditoría de consistencia de datos y aplicando marcas foforito en Word... Por favor, espera.")
+st.subheader("📁 2. Carga de tu Dictamen Pericial")
+archivo_docx = st.file_uploader("Subir Dictamen Pericial en Word (.docx)", type=["docx"])
+
+if archivo_docx is not None and oficio_oficial_input and carpeta_oficial_input:
+    st.info("🔍 Ejecutando auditoría de formalidad y aplicando marcas foforito en Word... Por favor, espera.")
     
-    # --- 1. EXTRACCIÓN DE TEXTO DEL PDF ---
-    texto_pdf = ""
-    try:
-        pdf_bytes = archivo_pdf.read()
-        strings = re.findall(b"[(][^)]*[)]", pdf_bytes)
-        for s in strings:
-            try:
-                texto_pdf += " " + s.decode('utf-8', errors='ignore').strip('()')
-            except:
-                pass
-    except Exception as e:
-        texto_pdf = "error"
-        
-    texto_pdf_lower = texto_pdf.lower()
-
-    # --- 2. EXTRAER DATOS CLAVE DEL PDF ---
-    match_carpeta_pdf = re.search(r'fed/[a-z0-9/_\-]+', texto_pdf_lower)
-    carpeta_solicitud = match_carpeta_pdf.group(0).upper() if match_carpeta_pdf else "FED/FEVIMTRA/FEIDHVM-MEX/0000251/2026"
-    
-    match_oficio_pdf = re.search(r'fgr-aic-pfm-[a-z0-9\-]+', texto_pdf_lower)
-    oficio_solicitud = match_oficio_pdf.group(0).upper() if match_oficio_pdf else "FGR-AIC-PFM-UINP-DIEDCS-SA-017608-2026"
+    oficio_solicitud = oficio_oficial_input.upper()
+    carpeta_solicitud = carpeta_oficial_input.upper()
 
     # --- 3. EXTRACCIÓN Y AUDITORÍA DE FORMALIDAD EN EL WORD ---
     doc = docx.Document(archivo_docx)
@@ -176,20 +160,20 @@ if archivo_pdf is not None and archivo_docx is not None:
     st.divider()
 
     # --- REPORTES EN PANTALLA DE CONSISTENCIA DE DATOS ---
-    st.subheader("🕵️‍♂️ 2. Resultados de Validación Cruzada (PDF vs. Word)")
+    st.subheader("🕵️‍♂️ 2. Resultados de Validación Cruzada (Datos de Entrada vs. Word)")
     col_pdf1, col_pdf2 = st.columns(2)
     with col_pdf1:
-        st.info(f"📄 **Oficio de Solicitud en PDF:** {oficio_solicitud}")
+        st.info(f"📄 **Oficio Esperado:** {oficio_solicitud}")
     with col_pdf2:
-        st.info(f"📂 **Carpeta de Investigación en PDF:** {carpeta_solicitud}")
+        st.info(f"📂 **Carpeta Esperada:** {carpeta_solicitud}")
 
     if errores_antecedentes_cuenta > 0 or errores_encabezado_cuenta > 0:
         if errores_antecedentes_cuenta > 0:
-            st.error(f"❌ **Error en Antecedentes:** El número de Oficio transcrito en tu dictamen no coincide con el del PDF oficial (**{oficio_solicitud}**).")
+            st.error(f"❌ **Error en Antecedentes:** El número de Oficio transcrito en tu dictamen no coincide con el Oficio de referencia (**{oficio_solicitud}**).")
         if errores_encabezado_cuenta > 0:
-            st.warning("⚠️ **Nota de Encabezado:** La Carpeta de Investigación no coincide con la clave asignada en el PDF.")
+            st.warning("⚠️ **Nota de Encabezado:** La Carpeta de Investigación no coincide con la clave de referencia.")
     else:
-        st.success("🎉 La Carpeta de Investigación y el Oficio transcrito en antecedentes coinciden perfectamente con la Solicitud.")
+        st.success("🎉 La Carpeta de Investigación y el Oficio transcrito en antecedentes coinciden perfectamente con los datos de referencia.")
 
     # REPORTE DE ORTOGRAFÍA
     st.subheader("📝 3. Reporte de Corrección Ortográfica y Acentuación")
@@ -207,5 +191,17 @@ if archivo_pdf is not None and archivo_docx is not None:
     for rubro in RUBROS_BASE:
         rubro_limpio = rubro.replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
         patron = rf"{rubro_limpio}(es|s)?\b"
+        if not re.search(patron, texto_completo_limpio):
+            rubros_faltantes.append(rubro.upper())
+
+    if len(rubros_faltantes) > 0:
+        st.error(f"❌ Faltan los siguientes rubros obligatorios en el Word: {', '.join(rubros_faltantes)}")
+    else:
+        st.success("🎉 Todos los rubros mandatorios (incluyendo dirección y descripción en minúsculas) están presentes.")
+
+    st.divider()
+
+    # ------------------ BOTÓN DE DESCARGA COMPLETAMENTE PROTEGIDO Y SEGURO ------------------
+
 
 

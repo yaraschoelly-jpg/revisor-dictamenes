@@ -2,7 +2,7 @@ import streamlit as st
 import subprocess
 import sys
 
-# Módulo de Autoinstalación Inteligente de Librerías
+# Módulo de Autoinstalación Inteligente de Librerías (Blindado contra caídas)
 try:
     import pypdf
 except ModuleNotFoundError:
@@ -17,14 +17,26 @@ except ModuleNotFoundError:
     import docx
     from docx.enum.text import WD_COLOR_INDEX, WD_ALIGN_PARAGRAPH
 
+try:
+    from spellchecker import SpellChecker
+except ModuleNotFoundError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "pyspellchecker"])
+    from spellchecker import SpellChecker
+
 import re
 import io
 
 # Configuración de la interfaz web
-st.set_page_config(page_title="Auditor Cruzado Oficial", page_icon="⚖️", layout="centered")
+st.set_page_config(page_title="Auditor Pericial Integral", page_icon="⚖️", layout="centered")
 
-st.title("⚖️ Auditor de Formalidad Estructural de Dictámenes")
-st.write("Sube el **PDF de Solicitud** y tu **Word del Dictamen**. El sistema validará la consistencia de datos y aplicará las marcas de color directamente en el archivo Word descargable.")
+st.title("⚖️ Auditor Pericial con Corrector Ortográfico Universal")
+st.write("Sube el **PDF de Solicitud** y tu **Word del Dictamen**. El sistema validará la estructura formal y revisará la **ortografía de absolutamente todas las palabras**.")
+
+# Inicializar corrector ortográfico en español de forma segura
+try:
+    corrector = SpellChecker(language='es')
+except:
+    corrector = SpellChecker()  # Respaldo general
 
 # Lista de rubros obligatorios según el manual de la institución
 RUBROS_BASE = [
@@ -42,9 +54,9 @@ with col_docx:
     archivo_docx = st.file_uploader("Subir Dictamen Pericial en Word (.docx)", type=["docx"])
 
 if archivo_pdf is not None and archivo_docx is not None:
-    st.info("🔍 Analizando documentos y aplicando marcas de color directamente en tu Word... Por favor, espera.")
+    st.info("🔍 Analizando consistencia, formalidad y ortografía universal... Por favor, espera.")
     
-    # --- 1. EXTRACCIÓN DE TEXTO DEL PDF SEGURO CON PYPDF ---
+    # --- 1. EXTRACCIÓN DE TEXTO DEL PDF ---
     texto_pdf = ""
     try:
         lector_pdf = pypdf.PdfReader(archivo_pdf)
@@ -62,7 +74,7 @@ if archivo_pdf is not None and archivo_docx is not None:
     match_oficio_pdf = re.search(r'fgr-aic-pfm-[a-z0-9\-]+', texto_pdf_lower)
     oficio_solicitud = match_oficio_pdf.group(0).upper() if match_oficio_pdf else "FGR-AIC-PFM-UINP-DIEDCS-SA-017608-2026"
 
-    # --- 3. EXTRACCIÓN Y AUDITORÍA DE FORMALIDAD EN EL WORD ---
+    # --- 3. EXTRACCIÓN Y AUDITORÍA EN EL WORD ---
     doc = docx.Document(archivo_docx)
     texto_word_completo = ""
     
@@ -73,10 +85,10 @@ if archivo_pdf is not None and archivo_docx is not None:
     errores_centrado_cuenta = 0
     errores_tipografia_cuenta = 0
     
-    palabras_sospechosas = []
+    alertas_ortografia = []
     alertas_diseno = []
 
-    # A. Revisión y Marcado del Encabezado
+    # A. Revisión del Encabezado
     try:
         for seccion in doc.sections:
             header = seccion.header
@@ -100,7 +112,7 @@ if archivo_pdf is not None and archivo_docx is not None:
     except Exception as e:
         pass
 
-    # B. Revisión del Cuerpo: Consistencia, Justificado, Tipografía y Centrados
+    # B. Revisión del Cuerpo, Alineaciones y Ortografía Universal
     tiene_ecatepec = False
     tiene_iztapalapa = False
 
@@ -117,20 +129,31 @@ if archivo_pdf is not None and archivo_docx is not None:
             if "iztapalapa" in txt_lower:
                 tiene_iztapalapa = True
 
+            # --- CORECTOR ORTOGRÁFICO UNIVERSAL POR PALABRA ---
+            # Limpiamos signos de puntuación pegados para no confundir al corrector
+            palabras_limpias = re.findall(r'\b[a-zA-ZáéíóúÁÉÍÓÚñÑ]+\b', txt)
+            palabras_dudosas = corrector.unknown(palabras_limpias)
+            
+            hubo_error_ortografia_parrafo = False
+            for palabra in palabras_dudosas:
+                # Ignoramos siglas oficiales comunes de la institución para evitar falsos positivos
+                if palabra.upper() in ["FGR", "AIC", "PFM", "UINP", "FED", "FEVIMTRA", "SA"]:
+                    continue
+                # Pintar la palabra sospechosa directamente en los fragmentos de Word
+                for run in parrafo.runs:
+                    if palabra in run.text:
+                        run.font.highlight_color = WD_COLOR_INDEX.YELLOW
+                        hubo_error_ortografia_parrafo = True
+                        alertas_ortografia.append(f"❌ **Párrafo {i}:** Palabra sospechosa o mal acentuada: `'{palabra}'`")
+
             # --- AUDITORÍA DE TIPOGRAFÍA (Raleway 9-11) ---
-            hubo_error_tipografia = False
             for run in parrafo.runs:
                 if run.text.strip():
                     fuente = run.font.name
                     tamaño = run.font.size.pt if run.font.size else None
-                    
                     if (fuente and fuente != "Raleway") or (tamaño and (tamaño < 9.0 or tamaño > 11.0)):
                         run.font.highlight_color = WD_COLOR_INDEX.YELLOW
-                        hubo_error_tipografia = True
-            
-            if hubo_error_tipografia:
-                errores_tipografia_cuenta += 1
-                alertas_diseno.append(f"⚠️ **Párrafo {i}:** Tipografía incorrecta. Asegúrate de usar Raleway de 9 a 11 puntos.")
+                        alertas_diseno.append(f"⚠️ **Párrafo {i}:** Usa letra fuera de formato.")
 
             # --- AUDITORÍA DE ALINEACIÓN ---
             alineacion = parrafo.alignment
@@ -140,80 +163,65 @@ if archivo_pdf is not None and archivo_docx is not None:
                 if alineacion != WD_ALIGN_PARAGRAPH.CENTER:
                     for run in parrafo.runs:
                         run.font.highlight_color = WD_COLOR_INDEX.YELLOW
-                    errores_centrado_cuenta += 1
-                    alertas_diseno.append(f"❌ **Párrafo {i}:** El rubro *'{txt}'* debe ir estrictamente **CENTRADO**.")
+                    alertas_diseno.append(f"❌ **Párrafo {i}:** El rubro *'{txt}'* debe ir **CENTRADO**.")
             else:
                 if len(txt) > 40 and alineacion != WD_ALIGN_PARAGRAPH.JUSTIFY:
                     for run in parrafo.runs:
                         run.font.highlight_color = WD_COLOR_INDEX.YELLOW
-                    errores_justificado_cuenta += 1
-                    alertas_diseno.append(f"❌ **Párrafo {i}:** Este párrafo de texto libre no se encuentra **JUSTIFICADO**.")
+                    alertas_diseno.append(f"❌ **Párrafo {i}:** Texto libre no se encuentra **JUSTIFICADO**.")
 
-            # VALIDACIÓN DEL OFICIO EN ANTECEDENTES
+            # VALIDACIÓN DE ANTECEDENTES
             if "antecedente" in txt_lower or "oficio número" in txt_lower or "oficio numero" in txt_lower:
                 if oficio_solicitud.lower() not in txt_lower and "fgr" in txt_lower:
                     for run in parrafo.runs:
                         run.font.highlight_color = WD_COLOR_INDEX.YELLOW
                     errores_antecedentes_cuenta += 1
 
-            # Marcar Contradicción Geográfica Directa
+            # Marcar Contradicción Geográfica
             if tiene_ecatepec and tiene_iztapalapa and "iztapalapa" in txt_lower and "[⚠️" not in txt:
-                parrafo.add_run(" [⚠️ CONTRADICCIÓN DE PLANTILLA: Tu Estudio de Campo declara Ecatepec, no Iztapalapa.]")
+                parrafo.add_run(" [⚠️ CONTRADICCIÓN DE PLANTILLA: Estudio declara Ecatepec, no Iztapalapa.]")
                 for run in parrafo.runs:
                     run.font.highlight_color = WD_COLOR_INDEX.YELLOW
                 errores_congruencia_cuenta += 1
 
-            # Alerta Ortográfica de nombres propios
-            if "rocio" in txt_lower and ("maritza" in txt_lower or "ramírez" in txt_lower):
-                if "roció" in txt_lower or "rocio" in txt_lower:
-                    for run in parrafo.runs:
-                        if "roció" in run.text.lower() or "rocio" in run.text.lower():
-                            run.font.highlight_color = WD_COLOR_INDEX.YELLOW
-                    palabras_sospechosas.append(txt)
         except Exception as e:
             continue
 
-    st.success("✅ ¡Auditoría e inyección de marcas en el archivo completadas!")
+    st.success("✅ ¡Auditoría e inyección de corrector ortográfico completadas!")
     st.divider()
 
-    # --- REPORTES EN PANTALLA ---
-    st.subheader("📐 1. Reporte de Diseño y Formalidad del Documento")
-    if alertas_diseno:
-        st.warning(f"Se detectaron detalles de formato que incumplen la estructura oficial:")
-        for alerta in list(set(alertas_diseno))[:10]:
+    # --- REPORTE EN PANTALLA DE ORTOGRAFÍA UNIVERSAL ---
+    st.subheader("📝 1. Reporte de Ortografía y Acentuación Crítica (Todo el Documento)")
+    if alertas_ortografia:
+        st.warning(f"Se detectaron {len(alertas_ortografia)} palabras con posibles faltas o acentos faltantes:")
+        for alerta in list(set(alertas_ortografia))[:15]:  # Muestra las primeras 15 para mantener orden
             st.markdown(alerta)
     else:
-        st.success("🎉 ¡Excelente formalidad! El tipo de letra, los márgenes justificados y los títulos centrados cumplen perfectamente con la estructura del manual.")
+        st.success("🎉 ¡Felicidades! No se detectó ninguna palabra con error ortográfico en todo el documento.")
 
     st.divider()
 
-    st.subheader("🕵️‍♂️ 2. Resultados de Validación Cruzada (PDF vs. Word)")
+    # --- REPORTES EN PANTALLA DE DISEÑO ---
+    st.subheader("📐 2. Reporte de Diseño y Formalidad del Documento")
+    if alertas_diseno:
+        st.warning("Detalles de alineación o fuentes detectados:")
+        for alerta in list(set(alertas_diseno))[:5]:
+            st.markdown(alerta)
+    else:
+        st.success("🎉 Estructura formal impecable (Raleway, Justificados y Centrados correctos).")
+
+    st.divider()
+
+    # --- REPORTES DE VALIDACIÓN CRUZADA ---
+    st.subheader("🕵️‍♂️ 3. Resultados de Validación Cruzada (PDF vs. Word)")
     col_pdf1, col_pdf2 = st.columns(2)
     with col_pdf1:
-        st.info(f"📄 **Oficio de Solicitud en PDF:** {oficio_solicitud}")
+        st.info(f"📄 **Oficio en PDF:** {oficio_solicitud}")
     with col_pdf2:
-        st.info(f"📂 **Carpeta de Investigación en PDF:** {carpeta_solicitud}")
-
-    if errores_antecedentes_cuenta > 0 or errores_encabezado_cuenta > 0:
-        if errores_antecedentes_cuenta > 0:
-            st.error(f"❌ **Error en Antecedentes:** El número de Oficio transcrito en tu dictamen no coincide con el del PDF oficial (**{oficio_solicitud}**).")
-        if errores_encabezado_cuenta > 0:
-            st.warning("⚠️ **Nota de Encabezado:** La Carpeta de Investigación no coincide con la clave asignada en el PDF.")
-    else:
-        st.success("🎉 La Carpeta de Investigación y el Oficio transcrito en antecedentes coinciden perfectamente con la Solicitud.")
+        st.info(f"📂 **Carpeta en PDF:** {carpeta_solicitud}")
 
     # Verificar presencia de Rubros Obligatorios
-    st.subheader("📋 3. Control de Rubros Estructurados")
     rubros_faltantes = []
     texto_completo_limpio = texto_word_completo.replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
-    
     for rubro in RUBROS_BASE:
         rubro_limpio = rubro.replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
-        patron = rf"{rubro_limpio}(es|s)?\b"
-        if not re.search(patron, texto_completo_limpio):
-            rubros_faltantes.append(rubro.upper())
-
-    if len(rubros_faltantes) > 0:
-        st.error(f"❌ Faltan los siguientes rubros obligatorios en el Word: {', '.join(rubros_faltantes)}")
-    
-    if len(rubros_faltantes) == 0:

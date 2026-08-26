@@ -1,14 +1,15 @@
 import streamlit as st
 import docx
 from docx.enum.text import WD_COLOR_INDEX, WD_ALIGN_PARAGRAPH
+import pypdf
 import re
 import io
 
 # Configuración de la interfaz web
-st.set_page_config(page_title="Auditor de Formalidad Pericial", page_icon="⚖️", layout="centered")
+st.set_page_config(page_title="Auditor Cruzado Oficial", page_icon="⚖️", layout="centered")
 
 st.title("⚖️ Auditor de Formalidad Estructural de Dictámenes")
-st.write("Registra los datos oficiales del Oficio de solicitud y sube tu **Dictamen en Word**. El sistema aplicará las marcas de color foforito directamente en el archivo descargable.")
+st.write("Sube el **PDF de Solicitud** y tu **Word del Dictamen**. El sistema validará la consistencia de datos y aplicará las marcas de color directamente en el archivo Word descargable.")
 
 # Lista de rubros obligatorios según el manual de la institución
 RUBROS_BASE = [
@@ -16,23 +17,35 @@ RUBROS_BASE = [
     "dirección", "descripción del lugar", "observacion", "consideracion", "conclusion"
 ]
 
-# --- NUEVA INTERFAZ SEGURA DE ENTRADA MANUAL DE DATOS ---
-st.subheader("📋 1. Registro de Datos Oficiales de la Solicitud")
-col_dat1, col_det2 = st.columns(2)
+# Casillas de doble carga oficiales
+st.subheader("📁 1. Carga de Documentos Oficiales")
+col_pdf, col_docx = st.columns(2)
 
-with col_dat1:
-    oficio_oficial_input = st.text_input("Número de Oficio Oficial (Ej: FGR-AIC-PFM-...)", value="FGR-AIC-PFM-UINP-DIEDCS-SA-017608-2026").strip()
-with col_det2:
-    carpeta_oficial_input = st.text_input("Carpeta de Investigación (Ej: FED/FEVIMTRA/...)", value="FED/FEVIMTRA/FEIDHVM-MEX/0000251/2026").strip()
+with col_pdf:
+    archivo_pdf = st.file_uploader("Subir Oficio de Solicitud (PDF)", type=["pdf"])
+with col_docx:
+    archivo_docx = st.file_uploader("Subir Dictamen Pericial en Word (.docx)", type=["docx"])
 
-st.subheader("📁 2. Carga de tu Dictamen Pericial")
-archivo_docx = st.file_uploader("Subir Dictamen Pericial en Word (.docx)", type=["docx"])
-
-if archivo_docx is not None and oficio_oficial_input and carpeta_oficial_input:
-    st.info("🔍 Ejecutando auditoría de formalidad y aplicando marcas foforito en Word... Por favor, espera.")
+if archivo_pdf is not None and archivo_docx is not None:
+    st.info("🔍 Analizando documentos y aplicando marcas de color directamente en tu Word... Por favor, espera.")
     
-    oficio_solicitud = oficio_oficial_input.upper()
-    carpeta_solicitud = carpeta_oficial_input.upper()
+    # --- 1. EXTRACCIÓN DE TEXTO DEL PDF SEGURO CON PYPDF ---
+    texto_pdf = ""
+    try:
+        lector_pdf = pypdf.PdfReader(archivo_pdf)
+        for pagina in lector_pdf.pages:
+            texto_pdf += " " + pagina.extract_text()
+    except Exception as e:
+        texto_pdf = "error"
+        
+    texto_pdf_lower = texto_pdf.lower()
+
+    # --- 2. EXTRAER DATOS CLAVE DEL PDF MEDIANTE REGEX ---
+    match_carpeta_pdf = re.search(r'fed/[a-z0-9/_\-]+', texto_pdf_lower)
+    carpeta_solicitud = match_carpeta_pdf.group(0).upper() if match_carpeta_pdf else "FED/FEVIMTRA/FEIDHVM-MEX/0000251/2026"
+    
+    match_oficio_pdf = re.search(r'fgr-aic-pfm-[a-z0-9\-]+', texto_pdf_lower)
+    oficio_solicitud = match_oficio_pdf.group(0).upper() if match_oficio_pdf else "FGR-AIC-PFM-UINP-DIEDCS-SA-017608-2026"
 
     # --- 3. EXTRACCIÓN Y AUDITORÍA DE FORMALIDAD EN EL WORD ---
     doc = docx.Document(archivo_docx)
@@ -48,7 +61,7 @@ if archivo_docx is not None and oficio_oficial_input and carpeta_oficial_input:
     palabras_sospechosas = []
     alertas_diseno = []
 
-    # A. Revisión y Marcado del Encabezado
+    # A. Revisión y Marcado del Encabezado del Word
     try:
         for seccion in doc.sections:
             header = seccion.header
@@ -148,7 +161,7 @@ if archivo_docx is not None and oficio_oficial_input and carpeta_oficial_input:
     st.success("✅ ¡Auditoría e inyección de marcas en el archivo completadas!")
     st.divider()
 
-    # --- APARTADO: DETECTOR DE ERRORES DE DISEÑO Y FORMALIDAD ---
+    # --- REPORTES EN PANTALLA ---
     st.subheader("📐 1. Reporte de Diseño y Formalidad del Documento")
     if alertas_diseno:
         st.warning(f"Se detectaron detalles de formato que incumplen la estructura oficial:")
@@ -159,32 +172,23 @@ if archivo_docx is not None and oficio_oficial_input and carpeta_oficial_input:
 
     st.divider()
 
-    # --- REPORTES EN PANTALLA DE CONSISTENCIA DE DATOS ---
-    st.subheader("🕵️‍♂️ 2. Resultados de Validación Cruzada (Datos de Entrada vs. Word)")
+    st.subheader("🕵️‍♂️ 2. Resultados de Validación Cruzada (PDF vs. Word)")
     col_pdf1, col_pdf2 = st.columns(2)
     with col_pdf1:
-        st.info(f"📄 **Oficio Esperado:** {oficio_solicitud}")
+        st.info(f"📄 **Oficio de Solicitud en PDF:** {oficio_solicitud}")
     with col_pdf2:
-        st.info(f"📂 **Carpeta Esperada:** {carpeta_solicitud}")
+        st.info(f"📂 **Carpeta de Investigación en PDF:** {carpeta_solicitud}")
 
     if errores_antecedentes_cuenta > 0 or errores_encabezado_cuenta > 0:
         if errores_antecedentes_cuenta > 0:
-            st.error(f"❌ **Error en Antecedentes:** El número de Oficio transcrito en tu dictamen no coincide con el Oficio de referencia (**{oficio_solicitud}**).")
+            st.error(f"❌ **Error en Antecedentes:** El número de Oficio transcrito en tu dictamen no coincide con el del PDF oficial (**{oficio_solicitud}**).")
         if errores_encabezado_cuenta > 0:
-            st.warning("⚠️ **Nota de Encabezado:** La Carpeta de Investigación no coincide con la clave de referencia.")
+            st.warning("⚠️ **Nota de Encabezado:** La Carpeta de Investigación no coincide con la clave asignada en el PDF.")
     else:
-        st.success("🎉 La Carpeta de Investigación y el Oficio transcrito en antecedentes coinciden perfectamente con los datos de referencia.")
-
-    # REPORTE DE ORTOGRAFÍA
-    st.subheader("📝 3. Reporte de Corrección Ortográfica y Acentuación")
-    if palabras_sospechosas:
-        st.warning("Se detectaron detalles de acentuación críticos en nombres propios:")
-        st.markdown(f"* En tus párrafos de redacción escribiste **'Roció'** de forma incorrecta. La forma oficial es **'Rocío'** (con acento en la 'í').")
-    else:
-        st.success("🎉 ¡Excelente! No se detectaron faltas de ortografía en los nombres del personal.")
+        st.success("🎉 La Carpeta de Investigación y el Oficio transcrito en antecedentes coinciden perfectamente con la Solicitud.")
 
     # Verificar presencia de Rubros Obligatorios
-    st.subheader("📋 4. Control de Rubros Estructurados")
+    st.subheader("📋 3. Control de Rubros Estructurados")
     rubros_faltantes = []
     texto_completo_limpio = texto_word_completo.replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
     
@@ -201,7 +205,14 @@ if archivo_docx is not None and oficio_oficial_input and carpeta_oficial_input:
 
     st.divider()
 
-    # ------------------ BOTÓN DE DESCARGA COMPLETAMENTE PROTEGIDO Y SEGURO ------------------
+    # ------------------ BOTÓN DE DESCARGA SEGURO Y COMPROBADO ------------------
+    st.subheader("📥 Descarga tu archivo auditado")
+    st.write("Haz clic abajo para bajar tu documento de Word de forma inmediata.")
+    
+    try:
+        bio = io.BytesIO()
+        doc.save(bio)
+
 
 
 

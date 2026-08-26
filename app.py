@@ -1,22 +1,7 @@
 import streamlit as st
-import subprocess
-import sys
-
-# Motor de Autoinstalación Forzada Directa en el Servidor
-try:
-    import docx
-    from docx.enum.text import WD_COLOR_INDEX, WD_ALIGN_PARAGRAPH
-except ModuleNotFoundError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "python-docx"])
-    import docx
-    from docx.enum.text import WD_COLOR_INDEX, WD_ALIGN_PARAGRAPH
-
-try:
-    import pypdf
-except ModuleNotFoundError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "pypdf"])
-    import pypdf
-
+import docx
+from docx.enum.text import WD_COLOR_INDEX, WD_ALIGN_PARAGRAPH
+import pypdf
 import re
 import io
 
@@ -192,7 +177,7 @@ if archivo_pdf is not None and archivo_docx is not None:
     st.subheader("📝 3. Reporte de Corrección Ortográfica y Acentuación")
     if palabras_sospechosas:
         st.warning("Se detectaron detalles de acentuación críticos en nombres propios:")
-        st.markdown(f"* En tus párrafos de redacción escribiste **'Roció'** de forma incorrecta. La forma oficial is **'Rocío'** (con acento en la 'í').")
+        st.markdown(f"* En tus párrafos de redacción escribiste **'Roció'** de forma incorrecta. La forma oficial es **'Rocío'** (con acento en la 'í').")
     else:
         st.success("🎉 ¡Excelente! No se detectaron faltas de ortografía en los nombres del personal.")
 
@@ -226,3 +211,4 @@ if archivo_pdf is not None and archivo_docx is not None:
     )
 else:
     st.warning("💡 Por favor, sube **ambos archivos** para iniciar la auditoría.")
+

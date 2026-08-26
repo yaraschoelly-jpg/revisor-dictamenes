@@ -40,7 +40,7 @@ if archivo_pdf is not None and archivo_docx is not None:
         
     texto_pdf_lower = texto_pdf.lower()
 
-    # --- 2. EXTRAER DATOS CLAVE DEL PDF MEDIANTE REGEX ---
+    # --- 2. EXTRAER DATOS CLAVE DEL PDF ---
     match_carpeta_pdf = re.search(r'fed/[a-z0-9/_\-]+', texto_pdf_lower)
     carpeta_solicitud = match_carpeta_pdf.group(0).upper() if match_carpeta_pdf else "FED/FEVIMTRA/FEIDHVM-MEX/0000251/2026"
     
@@ -61,7 +61,7 @@ if archivo_pdf is not None and archivo_docx is not None:
     palabras_sospechosas = []
     alertas_diseno = []
 
-    # A. Revisión y Marcado del Encabezado del Word
+    # A. Revisión y Marcado del Encabezado
     try:
         for seccion in doc.sections:
             header = seccion.header
@@ -205,13 +205,15 @@ if archivo_pdf is not None and archivo_docx is not None:
 
     st.divider()
 
-    # ------------------ BOTÓN DE DESCARGA SEGURO Y COMPROBADO ------------------
+    # ------------------ BOTÓN DE DESCARGA DIRECTO Y SEGURO ------------------
     st.subheader("📥 Descarga tu archivo auditado")
-    st.write("Haz clic abajo para bajar tu documento de Word de forma inmediata.")
+    st.write("Haz clic abajo para bajar tu documento de Word de forma inmediata con los cambios señalados.")
     
-    try:
-        bio = io.BytesIO()
-        doc.save(bio)
+    bio = io.BytesIO()
+    doc.save(bio)
+    bio.seek(0)
+    
+
 
 
 

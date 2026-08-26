@@ -8,7 +8,7 @@ import io
 st.set_page_config(page_title="Auditor de Formalidad Pericial", page_icon="⚖️", layout="centered")
 
 st.title("⚖️ Auditor de Formalidad Estructural de Dictámenes")
-st.write("Sube el **PDF de Solicitud** y tu **Word del Dictamen**. El sistema validará la consistencia de datos y que la estructura, letra, justificado y centrados cumplan estrictamente el manual oficial.")
+st.write("Sube el **PDF de Solicitud** y tu **Word del Dictamen**. El sistema validará la consistencia de datos y aplicará las marcas de color directamente en el archivo descargable.")
 
 # Lista de rubros obligatorios según el manual de la institución
 RUBROS_BASE = [
@@ -81,7 +81,6 @@ if archivo_pdf is not None and archivo_docx is not None:
                     if "carpeta" in texto_linea_lower:
                         digitos_carpeta = "".join(re.findall(r'\d+', carpeta_solicitud))
                         if not any(d in texto_linea_lower for d in digitos_carpeta[:4]):
-                            # REGISTRO DE CAMBIO FÍSICO: Añadimos la nota de error y pintamos en amarillo
                             parrafo.text = f"{texto_linea} [⚠️ ERROR DE CONTROL: DEBE SER {carpeta_solicitud}]"
                             for run in parrafo.runs:
                                 run.font.highlight_color = WD_COLOR_INDEX.YELLOW
@@ -127,14 +126,12 @@ if archivo_pdf is not None and archivo_docx is not None:
             
             if es_palabra_centrada:
                 if alineacion != WD_ALIGN_PARAGRAPH.CENTER:
-                    # REGISTRO FÍSICO EN WORD: Marcamos en amarillo si no está centrado
                     for run in parrafo.runs:
                         run.font.highlight_color = WD_COLOR_INDEX.YELLOW
                     errores_centrado_cuenta += 1
                     alertas_diseno.append(f"❌ **Párrafo {i}:** El rubro *'{txt}'* debe ir estrictamente **CENTRADO**.")
             else:
                 if len(txt) > 40 and alineacion != WD_ALIGN_PARAGRAPH.JUSTIFY:
-                    # REGISTRO FÍSICO EN WORD: Marcamos en amarillo si no está justificado
                     for run in parrafo.runs:
                         run.font.highlight_color = WD_COLOR_INDEX.YELLOW
                     errores_justificado_cuenta += 1
@@ -149,7 +146,6 @@ if archivo_pdf is not None and archivo_docx is not None:
 
             # Marcar Contradicción Geográfica Directa
             if tiene_ecatepec and tiene_iztapalapa and "iztapalapa" in txt_lower and "[⚠️" not in txt:
-                # REGISTRO FÍSICO EN WORD: Insertamos el aviso de contradicción al final de la línea y pintamos amarillo
                 parrafo.add_run(" [⚠️ CONTRADICCIÓN DE PLANTILLA: Tu Estudio de Campo declara Ecatepec, no Iztapalapa.]")
                 for run in parrafo.runs:
                     run.font.highlight_color = WD_COLOR_INDEX.YELLOW
@@ -158,7 +154,6 @@ if archivo_pdf is not None and archivo_docx is not None:
             # Alerta Ortográfica de nombres propios
             if "rocio" in txt_lower and ("maritza" in txt_lower or "ramírez" in txt_lower):
                 if "roció" in txt_lower or "rocio" in txt_lower:
-                    # REGISTRO FÍSICO EN WORD: Resaltamos el nombre mal escrito para que lo veas al abrir el archivo
                     for run in parrafo.runs:
                         if "roció" in run.text.lower() or "rocio" in run.text.lower():
                             run.font.highlight_color = WD_COLOR_INDEX.YELLOW
@@ -202,3 +197,14 @@ if archivo_pdf is not None and archivo_docx is not None:
         st.warning("Se detectaron detalles de acentuación críticos en nombres propios:")
         st.markdown(f"* En tus párrafos de redacción escribiste **'Roció'** de forma incorrecta. La forma oficial es **'Rocío'** (con acento en la 'í').")
     else:
+        st.success("🎉 ¡Excelente! No se detectaron faltas de ortografía en los nombres del personal.")
+
+    # Verificar presencia de Rubros Obligatorios
+    st.subheader("📋 4. Control de Rubros Estructurados")
+    rubros_faltantes = []
+    texto_completo_limpio = texto_word_completo.replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
+    
+    for rubro in RUBROS_BASE:
+        rubro_limpio = rubro.replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
+        patron = rf"{rubro_limpio}(es|s)?\b"
+

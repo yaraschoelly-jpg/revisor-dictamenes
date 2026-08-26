@@ -1,7 +1,22 @@
 import streamlit as st
-import docx
-from docx.enum.text import WD_COLOR_INDEX, WD_ALIGN_PARAGRAPH
-import pypdf
+import subprocess
+import sys
+
+# Módulo de Autoinstalación Inteligente de Librerías
+try:
+    import pypdf
+except ModuleNotFoundError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "pypdf"])
+    import pypdf
+
+try:
+    import docx
+    from docx.enum.text import WD_COLOR_INDEX, WD_ALIGN_PARAGRAPH
+except ModuleNotFoundError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "python-docx"])
+    import docx
+    from docx.enum.text import WD_COLOR_INDEX, WD_ALIGN_PARAGRAPH
+
 import re
 import io
 
@@ -201,17 +216,7 @@ if archivo_pdf is not None and archivo_docx is not None:
     if len(rubros_faltantes) > 0:
         st.error(f"❌ Faltan los siguientes rubros obligatorios en el Word: {', '.join(rubros_faltantes)}")
     else:
-        st.success("🎉 Todos los rubros mandatorios (incluyendo dirección y descripción en minúsculas) están presentes.")
 
-    st.divider()
-
-    # ------------------ BOTÓN DE DESCARGA DIRECTO Y SEGURO ------------------
-    st.subheader("📥 Descarga tu archivo auditado")
-    st.write("Haz clic abajo para bajar tu documento de Word de forma inmediata con los cambios señalados.")
-    
-    bio = io.BytesIO()
-    doc.save(bio)
-    bio.seek(0)
     
 
 

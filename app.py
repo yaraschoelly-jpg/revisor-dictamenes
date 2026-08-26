@@ -26,7 +26,7 @@ with col_docx:
     archivo_docx = st.file_uploader("Subir Dictamen Pericial en Word (.docx)", type=["docx"])
 
 if archivo_pdf is not None and archivo_docx is not None:
-    st.info("🔍 Ejecutando auditoría de consistencia de datos y control de diseño OpenXML... Por favor, espera.")
+    st.info("🔍 Ejecutando auditoría de consistencia de datos y aplicando marcas foforito en Word... Por favor, espera.")
     
     # --- 1. EXTRACCIÓN DE TEXTO DEL PDF ---
     texto_pdf = ""
@@ -81,7 +81,8 @@ if archivo_pdf is not None and archivo_docx is not None:
                     if "carpeta" in texto_linea_lower:
                         digitos_carpeta = "".join(re.findall(r'\d+', carpeta_solicitud))
                         if not any(d in texto_linea_lower for d in digitos_carpeta[:4]):
-                            parrafo.text = f"Carpeta de Investigación: [⚠️ ERROR: DEBE SER {carpeta_solicitud}]"
+                            # REGISTRO DE CAMBIO FÍSICO: Añadimos la nota de error y pintamos en amarillo
+                            parrafo.text = f"{texto_linea} [⚠️ ERROR DE CONTROL: DEBE SER {carpeta_solicitud}]"
                             for run in parrafo.runs:
                                 run.font.highlight_color = WD_COLOR_INDEX.YELLOW
                             errores_encabezado_cuenta += 1
@@ -106,6 +107,7 @@ if archivo_pdf is not None and archivo_docx is not None:
                 tiene_iztapalapa = True
 
             # --- AUDITORÍA DE TIPOGRAFÍA (Raleway 9-11) ---
+            hubo_error_tipografia = False
             for run in parrafo.runs:
                 if run.text.strip():
                     fuente = run.font.name
@@ -113,8 +115,11 @@ if archivo_pdf is not None and archivo_docx is not None:
                     
                     if (fuente and fuente != "Raleway") or (tamaño and (tamaño < 9.0 or tamaño > 11.0)):
                         run.font.highlight_color = WD_COLOR_INDEX.YELLOW
-                        errores_tipografia_cuenta += 1
-                        alertas_diseno.append(f"⚠️ **Párrafo {i}:** Tipografía incorrecta. Asegúrate de usar Raleway de 9 a 11 puntos.")
+                        hubo_error_tipografia = True
+            
+            if hubo_error_tipografia:
+                errores_tipografia_cuenta += 1
+                alertas_diseno.append(f"⚠️ **Párrafo {i}:** Tipografía incorrecta. Asegúrate de usar Raleway de 9 a 11 puntos.")
 
             # --- AUDITORÍA DE ALINEACIÓN ---
             alineacion = parrafo.alignment
@@ -122,12 +127,14 @@ if archivo_pdf is not None and archivo_docx is not None:
             
             if es_palabra_centrada:
                 if alineacion != WD_ALIGN_PARAGRAPH.CENTER:
+                    # REGISTRO FÍSICO EN WORD: Marcamos en amarillo si no está centrado
                     for run in parrafo.runs:
                         run.font.highlight_color = WD_COLOR_INDEX.YELLOW
                     errores_centrado_cuenta += 1
                     alertas_diseno.append(f"❌ **Párrafo {i}:** El rubro *'{txt}'* debe ir estrictamente **CENTRADO**.")
             else:
                 if len(txt) > 40 and alineacion != WD_ALIGN_PARAGRAPH.JUSTIFY:
+                    # REGISTRO FÍSICO EN WORD: Marcamos en amarillo si no está justificado
                     for run in parrafo.runs:
                         run.font.highlight_color = WD_COLOR_INDEX.YELLOW
                     errores_justificado_cuenta += 1
@@ -142,10 +149,8 @@ if archivo_pdf is not None and archivo_docx is not None:
 
             # Marcar Contradicción Geográfica Directa
             if tiene_ecatepec and tiene_iztapalapa and "iztapalapa" in txt_lower and "[⚠️" not in txt:
-                if parrafo.runs:
-                    parrafo.runs[-1].text += " [⚠️ CONTRADICCIÓN DE PLANTILLA: Tu Estudio de Campo declara Ecatepec, no Iztapalapa.]"
-                else:
-                    parrafo.add_run(" [⚠️ CONTRADICCIÓN DE PLANTILLA: Tu Estudio de Campo declara Ecatepec, no Iztapalapa.]")
+                # REGISTRO FÍSICO EN WORD: Insertamos el aviso de contradicción al final de la línea y pintamos amarillo
+                parrafo.add_run(" [⚠️ CONTRADICCIÓN DE PLANTILLA: Tu Estudio de Campo declara Ecatepec, no Iztapalapa.]")
                 for run in parrafo.runs:
                     run.font.highlight_color = WD_COLOR_INDEX.YELLOW
                 errores_congruencia_cuenta += 1
@@ -153,11 +158,15 @@ if archivo_pdf is not None and archivo_docx is not None:
             # Alerta Ortográfica de nombres propios
             if "rocio" in txt_lower and ("maritza" in txt_lower or "ramírez" in txt_lower):
                 if "roció" in txt_lower or "rocio" in txt_lower:
+                    # REGISTRO FÍSICO EN WORD: Resaltamos el nombre mal escrito para que lo veas al abrir el archivo
+                    for run in parrafo.runs:
+                        if "roció" in run.text.lower() or "rocio" in run.text.lower():
+                            run.font.highlight_color = WD_COLOR_INDEX.YELLOW
                     palabras_sospechosas.append(txt)
         except Exception as e:
             continue
 
-    st.success("✅ ¡Auditoría de consistencia y control de formalidad completados!")
+    st.success("✅ ¡Auditoría e inyección de marcas en el archivo completadas!")
     st.divider()
 
     # --- APARTADO: DETECTOR DE ERRORES DE DISEÑO Y FORMALIDAD ---
@@ -193,15 +202,3 @@ if archivo_pdf is not None and archivo_docx is not None:
         st.warning("Se detectaron detalles de acentuación críticos en nombres propios:")
         st.markdown(f"* En tus párrafos de redacción escribiste **'Roció'** de forma incorrecta. La forma oficial es **'Rocío'** (con acento en la 'í').")
     else:
-        st.success("🎉 ¡Excelente! No se detectaron faltas de ortografía en los nombres del personal.")
-
-    # Verificar presencia de Rubros Obligatorios (Acomodado de forma segura)
-    st.subheader("📋 4. Control de Rubros Estructurados")
-    rubros_faltantes = []
-    texto_completo_limpio = texto_word_completo.replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
-    for rubro in RUBROS_BASE:
-        rubro_limpio = rubro.replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
-        patron = rf"{rubro_limpio}(es|s)?\b"
-        if not re.search(patron, texto_completo_limpio):
-            rubros_faltantes.append(rubro.upper())
-    

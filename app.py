@@ -206,9 +206,4 @@ if archivo_pdf is not None and archivo_docx is not None:
         if not re.search(patron, texto_completo_limpio):
             rubros_faltantes.append(rubro.upper())
 
-if len(rubros_faltantes) > 0:
-    st.error(f"❌ Faltan los siguientes rubros obligatorios en el Word: {', '.join(rubros_faltantes)}")
-else:
-    st.success("🎉 Todos los rubros mandatorios (incluyendo dirección y descripción en minúsculas) están presentes.")
-
-
+    if len(rubros_faltantes) > 0:

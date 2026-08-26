@@ -208,3 +208,4 @@ if archivo_pdf is not None and archivo_docx is not None:
         rubro_limpio = rubro.replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
         patron = rf"{rubro_limpio}(es|s)?\b"
 
+

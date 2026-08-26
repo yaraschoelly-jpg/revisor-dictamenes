@@ -215,4 +215,5 @@ if archivo_pdf is not None and archivo_docx is not None:
 
     if len(rubros_faltantes) > 0:
         st.error(f"❌ Faltan los siguientes rubros obligatorios en el Word: {', '.join(rubros_faltantes)}")
-    else:
+    
+    if len(rubros_faltantes) == 0:

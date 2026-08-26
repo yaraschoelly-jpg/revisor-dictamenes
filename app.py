@@ -22,7 +22,8 @@ col_pdf, col_docx = st.columns(2)
 
 with col_pdf:
     archivo_pdf = st.file_uploader("Subir Oficio de Solicitud (PDF)", type=["pdf"])
-with col_docx = st.file_uploader("Subir Dictamen Pericial en Word (.docx)", type=["docx"])
+with col_docx:
+    archivo_docx = st.file_uploader("Subir Dictamen Pericial en Word (.docx)", type=["docx"])
 
 if archivo_pdf is not None and archivo_docx is not None:
     st.info("🔍 Ejecutando auditoría de consistencia de datos y control de diseño OpenXML... Por favor, espera.")

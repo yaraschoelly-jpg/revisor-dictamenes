@@ -23,7 +23,7 @@ st.set_page_config(
 st.title("⚖️ Auditor Pericial de Formalidad y Cotejo")
 st.write(
     "Sube el **PDF de Solicitud** y el **Word del Dictamen** para auditar"
-    " encabezados, redacción, formato y consistencia de datos."
+    " encabezados, ubicación de destinatario, redacción y formato."
 )
 
 st.subheader("1. Carga de Documentos Oficiales")
@@ -45,7 +45,6 @@ if archivo_pdf is not None and archivo_docx is not None:
     bytes_pdf = archivo_pdf.read()
     texto_pdf = ""
 
-    # Intento 1: Extracción Digital Rápida
     try:
       with pdfplumber.open(io.BytesIO(bytes_pdf)) as pdf:
         for pagina in pdf.pages:
@@ -55,7 +54,6 @@ if archivo_pdf is not None and archivo_docx is not None:
     except Exception:
       pass
 
-    # Intento 2: OCR Si es PDF Escaneado / Imagen
     if not texto_pdf.strip():
       try:
         imagenes = convert_from_bytes(bytes_pdf)
@@ -64,7 +62,7 @@ if archivo_pdf is not None and archivo_docx is not None:
       except Exception as e:
         st.error(f"Error al ejecutar OCR en el PDF: {e}")
 
-    # --- BÚSQUEDA DE DATOS CLAVE (REGEX) ---
+    # Extracción de Datos en PDF
     match_carpeta = re.search(
         r"(carpeta|expediente|causa|cui|ap|ci)\s*[\w\d\.\-/:]+",
         texto_pdf,
@@ -107,13 +105,13 @@ if archivo_pdf is not None and archivo_docx is not None:
         else "NO DETECTADO"
     )
 
-    # --- 2. AUDITORÍA EN WORD (DICTAMEN) ---
+    # --- 2. AUDITORÍA Y CORRECCIÓN EN WORD ---
     doc = docx.Document(archivo_docx)
     texto_word_completo = ""
     alertas_alineacion = []
     observaciones_cotejo = []
 
-    # A. Auditando Encabezado de Sección
+    # A. Auditando Encabezado
     try:
       for seccion in doc.sections:
         if seccion.header:
@@ -156,8 +154,27 @@ if archivo_pdf is not None and archivo_docx is not None:
     except Exception:
       pass
 
-    # B. Revisión de Párrafos del Cuerpo
-    for i, p in enumerate(doc.paragraphs, start=1):
+    # B. Eliminación de espacios en blanco antes de "PRESENTE"
+    parrafos = doc.paragraphs
+    i = 0
+    while i < len(parrafos):
+      txt_p = parrafos[i].text.strip()
+      txt_limpio_p = quitar_acentos(txt_p.lower()).replace(" ", "")
+
+      if txt_limpio_p == "presente":
+        # Revisar párrafos anteriores en blanco y eliminarlos
+        j = i - 1
+        while j >= 0 and not parrafos[j].text.strip():
+          p_element = parrafos[j]._element
+          p_element.getparent().remove(p_element)
+          alertas_alineacion.append(
+              f"Se eliminó un espacio en blanco innecesario antes de la palabra 'PRESENTE'."
+          )
+          j -= 1
+      i += 1
+
+    # C. Revisión Párrafo por Párrafo del Cuerpo
+    for idx, p in enumerate(doc.paragraphs, start=1):
       txt = p.text.strip()
       if not txt:
         continue
@@ -166,26 +183,38 @@ if archivo_pdf is not None and archivo_docx is not None:
       txt_limpio = quitar_acentos(txt_lower)
       texto_word_completo += " " + txt_lower
 
-      # REGLAS DE ALINEACIÓN
+      # --- REGLAS DE ALINEACIÓN ---
+
+      # 1. ELEMENTOS A LA DERECHA
       es_asunto = "asunto:" in txt_limpio or "se emite dictamen" in txt_limpio
       es_leyenda_oficial = "margarita maza parada" in txt_limpio or "ano de" in txt_limpio
       es_fecha = bool(re.search(r'\b(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\b', txt_limpio)) and len(txt) < 60
 
       es_derecha = es_asunto or es_leyenda_oficial or es_fecha
 
+      # 2. ELEMENTOS AL CENTRO
       es_palabra_dictamen = "dictamen" in txt_limpio.replace(" ", "") and len(txt) < 30
       es_atentamente = "atentamente" in txt_limpio and len(txt) < 30
       es_perito = "perito en criminalistica" in txt_limpio
 
       es_centrado = es_palabra_dictamen or es_atentamente or es_perito
 
-      if es_derecha:
+      # 3. REGLA ESPECÍFICA "PRESENTE" (Izquierda / Debajo del Destinatario)
+      es_presente = txt_limpio.replace(" ", "") == "presente"
+
+      if es_presente:
+        p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        alertas_alineacion.append(
+            f"Párrafo {idx}: La palabra 'PRESENTE' se alineó correctamente debajo de la autoridad solicitante sin espacios intermedios."
+        )
+
+      elif es_derecha:
         if p.alignment != WD_ALIGN_PARAGRAPH.RIGHT:
           p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
           for r in p.runs:
             r.font.highlight_color = WD_COLOR_INDEX.YELLOW
           alertas_alineacion.append(
-              f"Párrafo {i}: '{txt[:35]}...' alineado A LA DERECHA."
+              f"Párrafo {idx}: '{txt[:35]}...' alineado A LA DERECHA."
           )
 
       elif es_centrado:
@@ -194,7 +223,7 @@ if archivo_pdf is not None and archivo_docx is not None:
           for r in p.runs:
             r.font.highlight_color = WD_COLOR_INDEX.YELLOW
           alertas_alineacion.append(
-              f"Párrafo {i}: '{txt[:35]}...' alineado AL CENTRO."
+              f"Párrafo {idx}: '{txt[:35]}...' alineado AL CENTRO."
           )
 
       else:
@@ -203,7 +232,7 @@ if archivo_pdf is not None and archivo_docx is not None:
           for r in p.runs:
             r.font.highlight_color = WD_COLOR_INDEX.YELLOW
           alertas_alineacion.append(
-              f"Párrafo {i}: Alineación ajustada a JUSTIFICADO."
+              f"Párrafo {idx}: Alineación ajustada a JUSTIFICADO."
           )
 
   # --- MOSTRAR RESULTADOS ---
@@ -224,7 +253,7 @@ if archivo_pdf is not None and archivo_docx is not None:
       st.warning("No se pudo extraer texto ni con OCR. Verifica la imagen.")
 
   if observaciones_cotejo:
-    st.subheader("⚠️ Observaciones de Encabezado y Cotejo")
+    st.subheader("⚠️️ Observaciones de Encabezado y Cotejo")
     for obs in set(observaciones_cotejo):
       st.error(f"❌ {obs}")
 
@@ -235,7 +264,7 @@ if archivo_pdf is not None and archivo_docx is not None:
     for al in list(set(alertas_alineacion))[:8]:
       st.write(f"* {al}")
   else:
-    st.success("Alineaciones correctas (Derecha, Centro y Justificado).")
+    st.success("Alineaciones correctas (Derecha, Centro, Presente y Justificado).")
 
   st.divider()
 

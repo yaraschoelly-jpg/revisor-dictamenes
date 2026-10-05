@@ -29,7 +29,7 @@ def activar_control_de_cambios(doc):
 
 
 def corregir_y_resaltar_ortografia(p, idx, alertas_ortografia):
-  """Detecta errores de sintaxis u ortografía técnica, resalta la palabra original en amarillo."""
+  """Detecta errores de sintaxis u ortografía técnica y resalta en amarillo."""
   correcciones = {
       r"\bcaracteristicas\b": "características",
       r"\bfisica\b": "física",
@@ -57,7 +57,6 @@ def corregir_y_resaltar_ortografia(p, idx, alertas_ortografia):
       for run in p.runs:
         if re.search(patron, run.text, re.IGNORECASE):
           run.font.highlight_color = WD_COLOR_INDEX.YELLOW
-
       texto_original = re.sub(
           patron, reemplazo, texto_original, flags=re.IGNORECASE
       )
@@ -97,7 +96,7 @@ with col_docx:
 
 if archivo_pdf is not None and archivo_docx is not None:
   with st.spinner(
-      "Procesando, activando Control de Cambios y resaltando errores... Por"
+      "Procesando, activando Control de Cambios y realizando auditoría... Por"
       " favor, espera."
   ):
 
@@ -149,45 +148,3 @@ if archivo_pdf is not None and archivo_docx is not None:
         r"(oficio|fgr|aic|pfm|uinp|sub)\s*[\w\d\.\-/:]+",
         texto_pdf,
         re.IGNORECASE,
-    )
-    oficio_solicitud = (
-        match_oficio.group(0).upper().strip() if match_oficio else "NO DETECTADO"
-    )
-
-    match_remitente = re.search(
-        r"(lic\.|mtro\.|mtra\.|dr\.|dra\.|licenciado|licenciada|c\.)\s+([a-záéíóúñ\s]+)",
-        texto_pdf,
-        re.IGNORECASE,
-    )
-    remitente_solicitud = (
-        match_remitente.group(0).strip().upper()
-        if match_remitente
-        else "NO DETECTADO"
-    )
-
-    # --- 2. AUDITORÍA, CONTROL DE CAMBIOS Y RESALTADO EN WORD ---
-    doc = docx.Document(archivo_docx)
-
-    # ACTIVAR CONTROL DE CAMBIOS EN EL DOCUMENTO
-    activar_control_de_cambios(doc)
-
-    texto_word_completo = ""
-    alertas_alineacion = []
-    alertas_ortografia = []
-    observaciones_cotejo = []
-
-    # A. Auditando Encabezado
-    try:
-      for seccion in doc.sections:
-        if seccion.header:
-          header_text = ""
-          paragraphs_header = seccion.header.paragraphs
-          for p in paragraphs_header:
-            header_text += " " + p.text.strip().lower()
-
-          if carpeta_solicitud != "NO DETECTADO":
-            carpeta_clean = re.sub(r"[^\w]", "", carpeta_solicitud.lower())
-            header_clean = re.sub(r"[^\w]", "", header_text)
-            if carpeta_clean not in header_clean:
-              if paragraphs_header:
-                p_target =

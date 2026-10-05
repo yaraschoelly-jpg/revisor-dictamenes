@@ -64,7 +64,6 @@ if archivo_pdf is not None and archivo_docx is not None:
     except Exception as e:
       st.error(f"Error al leer el PDF: {e}")
 
-    # Extraer Carpeta y Oficio con expresiones regulares flexibles
     match_carpeta = re.search(
         r"(FED|CUI|EXP|CP|CI|CAUSA)[/\-\w\d]+", texto_pdf, re.IGNORECASE
     )
@@ -97,7 +96,7 @@ if archivo_pdf is not None and archivo_docx is not None:
                   and carpeta_solicitud.lower() not in p_text.lower()
               ):
                 p.add_run(
-                    f" [⚠️ ERROR: EN SOLICITUD CONSTA {carpeta_solicitud}]"
+                    f" [⚠️️ ERROR: EN SOLICITUD CONSTA {carpeta_solicitud}]"
                 )
                 for r in p.runs:
                   r.font.highlight_color = WD_COLOR_INDEX.YELLOW
@@ -133,21 +132,25 @@ if archivo_pdf is not None and archivo_docx is not None:
             f"Párrafo {i}: Verificar acentuación del nombre 'Rocío'."
         )
 
-      # Revisión de Alineación
-      es_centrado = any(
-          kw in txt_lower
-          for kw in [
-              "d i c t a m e n",
-              "atentamente",
-              "nombre y firma",
-              "dictamen pericial",
-          ]
+      # --- REVISIÓN DE ALINEACIÓN Y CENTRADO DE 'DICTAMEN' ---
+      # Evalúa 'dictamen' normal o con espacios intermedios 'd i c t a m e n'
+      es_palabra_dictamen = bool(
+          re.search(r"\bd\s*i\s*c\s*t\s*a\s*m\s*e\s*n\b", txt_lower)
       )
+      es_centrado = es_palabra_dictamen or any(
+          kw in txt_lower
+          for kw in ["atentamente", "nombre y firma", "dictamen pericial"]
+      )
+
       if es_centrado:
-        if p.alignment is not None and p.alignment != WD_ALIGN_PARAGRAPH.CENTER:
+        if p.alignment != WD_ALIGN_PARAGRAPH.CENTER:
+          p.alignment = WD_ALIGN_PARAGRAPH.CENTER  # Fuerza el centrado en el documento generado
           for r in p.runs:
             r.font.highlight_color = WD_COLOR_INDEX.YELLOW
-          alertas_diseno.append(f"❌ Párrafo {i}: Debe ir CENTRADO.")
+          alertas_diseno.append(
+              f"❌ Párrafo {i}: La palabra *'{txt[:30]}'* no estaba centrada"
+              " (se corrigió y resaltó en amarillo)."
+          )
       elif len(txt) > 80:
         if (
             p.alignment is not None
@@ -191,38 +194,4 @@ if archivo_pdf is not None and archivo_docx is not None:
 
   st.subheader("📝 3. Reporte Ortográfico")
   if palabras_sospechosas:
-    for ps in set(palabras_sospechosas):
-      st.write(f"* {ps}")
-  else:
-    st.success("Sin faltas ortográficas detectadas en nombres de personal.")
-
-  # Rubros Faltantes
-  rubros_faltantes = []
-  txt_completo_clean = quitar_acentos(texto_word_completo)
-  for rubro in RUBROS_BASE:
-    if quitar_acentos(rubro) not in txt_completo_clean:
-      rubros_faltantes.append(rubro.upper())
-
-  if rubros_faltantes:
-    st.error(
-        f"❌ Faltan los siguientes rubros obligatorios: {', '.join(rubros_faltantes)}"
-    )
-
-  st.divider()
-
-  # Botón para descargar el Word modificado
-  st.subheader("📥 Descargar documento auditado")
-  bio = io.BytesIO()
-  doc.save(bio)
-  bio.seek(0)
-
-  st.download_button(
-      label="📥 Descargar Word con Marcas de Error",
-      data=bio,
-      file_name="DICTAMEN_AUDITADO.docx",
-      mime=(
-          "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-      ),
-  )
-else:
-  st.warning("💡 Por favor, sube **ambos archivos** para iniciar la auditoría.")
+    for ps in set(palabras_sospechosas

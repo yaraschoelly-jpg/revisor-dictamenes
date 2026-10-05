@@ -3,6 +3,8 @@ import re
 import unicodedata
 import docx
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_COLOR_INDEX
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 from docx.shared import Pt
 import pdfplumber
 from pdf2image import convert_from_bytes
@@ -17,8 +19,20 @@ def quitar_acentos(texto):
   return "".join(c for c in texto_norm if unicodedata.category(c) != "Mn")
 
 
-def corregir_ortografia_texto(texto):
-  # Lista de correcciones técnicas comunes en dictámenes
+def activar_control_de_cambios(doc):
+  """Activa el control de cambios (Track Changes) en el archivo Word."""
+  settings = doc.settings._element
+  track_revisions = settings.find(qn("w:trackRevisions"))
+  if track_revisions is None:
+    track_revisions = OxmlElement("w:trackRevisions")
+    settings.append(track_revisions)
+
+
+def corregir_y_resaltar_ortografia(p, idx, alertas_ortografia):
+  """Detecta errores de sintaxis u ortografía técnica, resalta la palabra original
+
+  en amarillo y sugiere la corrección.
+  """
   correcciones = {
       r"\bcaracteristicas\b": "características",
       r"\bfisica\b": "física",
@@ -36,12 +50,34 @@ def corregir_ortografia_texto(texto):
       r"\btecnica\b": "técnica",
       r"\btecnico\b": "técnico",
   }
-  texto_corregido = texto
+
+  texto_original = p.text
+  hubo_cambio = False
+
   for patron, reemplazo in correcciones.items():
-    texto_corregido = re.sub(
-        patron, reemplazo, texto_corregido, flags=re.IGNORECASE
+    if re.search(patron, texto_original, re.IGNORECASE):
+      hubo_cambio = True
+      # Resaltar párrafos con errores de sintaxis/ortografía técnica
+      for run in p.runs:
+        if re.search(patron, run.text, re.IGNORECASE):
+          run.font.highlight_color = WD_COLOR_INDEX.YELLOW
+
+      # Sustitución respetando mayúsculas y minúsculas
+      texto_original = re.sub(
+          patron, reemplazo, texto_original, flags=re.IGNORECASE
+      )
+
+  if hubo_cambio:
+    p.text = texto_original
+    # Reaplicar el resaltado amarillo al texto corregido para visibilidad
+    for run in p.runs:
+      for _, reemplazo in correcciones.items():
+        if reemplazo.lower() in run.text.lower():
+          run.font.highlight_color = WD_COLOR_INDEX.YELLOW
+    alertas_ortografia.append(
+        f"Párrafo {idx}: Se identificaron y subrayaron errores de acentuación"
+        " o sintaxis."
     )
-  return texto_corregido
 
 
 st.set_page_config(
@@ -50,8 +86,9 @@ st.set_page_config(
 
 st.title("⚖️ Auditor Pericial de Formalidad y Sintaxis")
 st.write(
-    "Sube el **PDF de Solicitud** y el **Word del Dictamen** para auditar"
-    " ortografía, sintaxis, alineaciones y cotejo de datos."
+    "Sube el **PDF de Solicitud** y el **Word del Dictamen** para activar el"
+    " **Control de Cambios**, resaltar errores gramaticales y auditar la"
+    " estructura."
 )
 
 st.subheader("1. Carga de Documentos Oficiales")
@@ -66,7 +103,8 @@ with col_docx:
 
 if archivo_pdf is not None and archivo_docx is not None:
   with st.spinner(
-      "Procesando, realizando OCR y auditando sintaxis... Por favor, espera."
+      "Procesando, activando Control de Cambios y resaltando errores... Por"
+      " favor, espera."
   ):
 
     # --- 1. LECTURA DIGITAL + MOTOR OCR ---
@@ -133,8 +171,12 @@ if archivo_pdf is not None and archivo_docx is not None:
         else "NO DETECTADO"
     )
 
-    # --- 2. AUDITORÍA Y CORRECCIÓN EN WORD ---
+    # --- 2. AUDITORÍA, CONTROL DE CAMBIOS Y RESALTADO EN WORD ---
     doc = docx.Document(archivo_docx)
+
+    # ACTIVAR CONTROL DE CAMBIOS EN EL DOCUMENTO
+    activar_control_de_cambios(doc)
+
     texto_word_completo = ""
     alertas_alineacion = []
     alertas_ortografia = []
@@ -176,142 +218,3 @@ if archivo_pdf is not None and archivo_docx is not None:
                     f" ({folio_solicitud})]"
                 )
                 for r in p_target.runs:
-                  r.font.highlight_color = WD_COLOR_INDEX.YELLOW
-              observaciones_cotejo.append(
-                  f"Número de folio difiere o no consta ({folio_solicitud})."
-              )
-    except Exception:
-      pass
-
-    # B. Limpieza de Espacios antes de "PRESENTE"
-    parrafos = doc.paragraphs
-    i = 0
-    while i < len(parrafos):
-      txt_p = parrafos[i].text.strip()
-      txt_limpio_p = quitar_acentos(txt_p.lower()).replace(" ", "")
-
-      if txt_limpio_p == "presente":
-        j = i - 1
-        while j >= 0 and not parrafos[j].text.strip():
-          p_element = parrafos[j]._element
-          p_element.getparent().remove(p_element)
-          alertas_alineacion.append(
-              "Se eliminaron espacios vacíos previos a la palabra 'PRESENTE'."
-          )
-          j -= 1
-      i += 1
-
-    # C. Revisión Párrafo por Párrafo del Cuerpo
-    for idx, p in enumerate(doc.paragraphs, start=1):
-      txt = p.text.strip()
-
-      # Detección de imágenes/fotografías
-      tiene_imagen = len(p._element.xpath('.//w:drawing | .//w:pict')) > 0
-
-      txt_lower = txt.lower()
-      txt_limpio = quitar_acentos(txt_lower)
-      texto_word_completo += " " + txt_lower
-
-      # CORRECCIÓN DE ORTOGRAFÍA / SINTAXIS
-      txt_corregido = corregir_ortografia_texto(txt)
-      if txt_corregido != txt:
-        p.text = txt_corregido
-        alertas_ortografia.append(
-            f"Párrafo {idx}: Se corrigió la ortografía/acentuación del texto."
-        )
-
-      # REGLA 1: "PRESENTE"
-      es_presente = txt_limpio.replace(" ", "") == "presente"
-      if es_presente:
-        p.alignment = WD_ALIGN_PARAGRAPH.LEFT
-        p.paragraph_format.line_spacing = 1.0
-        p.paragraph_format.space_after = Pt(0)
-        continue
-
-      if not txt and not tiene_imagen:
-        continue
-
-      # REGLA 2: FOTOGRAFÍAS / PIES DE FOTO
-      es_nombre_fotografia = any(
-          txt_limpio.startswith(prefix)
-          for prefix in [
-              "fotografia",
-              "foto",
-              "figura",
-              "imagen",
-              "grafica",
-              "iluminacion",
-          ]
-      )
-
-      if tiene_imagen or es_nombre_fotografia:
-        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        continue
-
-      # REGLA 3: ELEMENTOS A LA DERECHA
-      es_asunto = "asunto:" in txt_limpio or "se emite dictamen" in txt_limpio
-      es_leyenda_oficial = "margarita maza parada" in txt_limpio or "ano de" in txt_limpio
-      es_fecha = bool(re.search(r'\b(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\b', txt_limpio)) and len(txt) < 60
-
-      es_derecha = es_asunto or es_leyenda_oficial or es_fecha
-
-      # REGLA 4: ELEMENTOS AL CENTRO
-      es_palabra_dictamen = "dictamen" in txt_limpio.replace(" ", "") and len(txt) < 30
-      es_atentamente = "atentamente" in txt_limpio and len(txt) < 30
-      es_perito = "perito en criminalistica" in txt_limpio
-
-      es_centrado = es_palabra_dictamen or es_atentamente or es_perito
-
-      # APLICACIÓN DE ALINEACIONES
-      if es_derecha:
-        p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-      elif es_centrado:
-        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-      else:
-        if len(txt) > 40:
-          p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-
-  # --- MOSTRAR RESULTADOS ---
-  st.success("🎉 ¡Auditoría completada!")
-  st.divider()
-
-  st.subheader("🕵️‍♂️ 1. Datos Extraídos del PDF (Digital/OCR)")
-  col1, col2, col3, col4 = st.columns(4)
-  col1.metric("Carpeta Inv.", carpeta_solicitud)
-  col2.metric("Folio", folio_solicitud)
-  col3.metric("Oficio", oficio_solicitud)
-  col4.metric("Remitente", remitente_solicitud)
-
-  if observaciones_cotejo:
-    st.subheader("⚠️ Observaciones de Encabezado y Cotejo")
-    for obs in set(observaciones_cotejo):
-      st.error(f"❌ {obs}")
-
-  st.divider()
-
-  st.subheader("📝 2. Reporte de Correcciones Ortográficas y Sintaxis")
-  if alertas_ortografia:
-    for ao in list(set(alertas_ortografia))[:8]:
-      st.info(f"✔️ {ao}")
-  else:
-    st.success(
-        "No se detectaron faltas de acentuación técnica en palabras clave."
-    )
-
-  st.divider()
-
-  st.subheader("📥 3. Descargar Word Auditado y Corregido")
-  bio = io.BytesIO()
-  doc.save(bio)
-  bio.seek(0)
-
-  st.download_button(
-      label="📥 Descargar Word con Correcciones Aplicadas",
-      data=bio,
-      file_name="DICTAMEN_AUDITADO_Y_CORREGIDO.docx",
-      mime=(
-          "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-      ),
-  )
-else:
-  st.warning("💡 Por favor, sube ambos archivos para iniciar la auditoría.")

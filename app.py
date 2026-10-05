@@ -7,7 +7,6 @@ import pypdf
 import streamlit as st
 
 
-# Función para quitar acentos
 def quitar_acentos(texto):
   if not texto:
     return ""
@@ -19,23 +18,11 @@ st.set_page_config(
     page_title="Auditor Pericial Integral", page_icon="⚖️", layout="centered"
 )
 
-st.title("⚖️ Auditor Pericial de Formalidad Estructural")
+st.title("⚖️ Auditor Pericial de Formalidad y Cotejo")
 st.write(
-    "Sube el **PDF de Solicitud** y tu **Word del Dictamen**. El sistema"
-    " validará la estructura formal y aplicará las marcas directamente en tu"
-    " documento de Word."
+    "Sube el **PDF de Solicitud** y el **Word del Dictamen** para auditar"
+    " redacción, formato y consistencia de datos."
 )
-
-RUBROS_BASE = [
-    "planteamiento del problema",
-    "antecedente",
-    "estudio de campo",
-    "direccion",
-    "descripcion del lugar",
-    "observacion",
-    "consideracion",
-    "conclusion",
-]
 
 st.subheader("1. Carga de Documentos Oficiales")
 col_pdf, col_docx = st.columns(2)
@@ -49,10 +36,10 @@ with col_docx:
 
 if archivo_pdf is not None and archivo_docx is not None:
   with st.spinner(
-      "Analizando consistencia, formalidad y ortografía... Por favor, espera."
+      "Procesando y cotejando información... Por favor, espera."
   ):
 
-    # --- 1. LECTURA Y EXTRACCIÓN DEL PDF ---
+    # --- 1. EXTRACCIÓN DE DATOS EN PDF (SOLICITUD) ---
     texto_pdf = ""
     try:
       lector_pdf = pypdf.PdfReader(archivo_pdf)
@@ -63,6 +50,7 @@ if archivo_pdf is not None and archivo_docx is not None:
     except Exception as e:
       st.error(f"Error al leer el PDF: {e}")
 
+    # Extracción de Carpeta de Investigación
     match_carpeta = re.search(
         r"(FED|CUI|EXP|CP|CI|CAUSA)[/\-\w\d]+", texto_pdf, re.IGNORECASE
     )
@@ -70,158 +58,152 @@ if archivo_pdf is not None and archivo_docx is not None:
         match_carpeta.group(0).upper() if match_carpeta else "NO DETECTADO"
     )
 
+    # Extracción de Número de Oficio
     match_oficio = re.search(
-        r"(FGR|AIC|PFM|UINP|SUB)[/\-\w\d]+", texto_pdf, re.IGNORECASE
+        r"(FGR|AIC|PFM|UINP|SUB|OFICIO)[/\-\w\d]+", texto_pdf, re.IGNORECASE
     )
     oficio_solicitud = (
         match_oficio.group(0).upper() if match_oficio else "NO DETECTADO"
     )
 
-    # --- 2. LECTURA Y AUDITORÍA DEL WORD ---
+    # Extracción del Remitente (Nombre de quien envía)
+    match_remitente = re.search(
+        r"(LIC\.|MTRO\.|MTRA\.|DR\.|DRA\.|LICENCIADO|LICENCIADA)\s+([A-ZÁÉÍÓÚÑ\s]+)",
+        texto_pdf,
+        re.IGNORECASE,
+    )
+    remitente_solicitud = (
+        match_remitente.group(0).strip() if match_remitente else "NO DETECTADO"
+    )
+
+    # --- 2. AUDITORÍA EN WORD (DICTAMEN) ---
     doc = docx.Document(archivo_docx)
     texto_word_completo = ""
-    palabras_sospechosas = []
-    alertas_diseno = []
+    alertas_alineacion = []
+    observaciones_cotejo = []
 
-    # A. Revisión del Encabezado
+    # A. Cotejo en Encabezados y Secciones del Word
     try:
       for seccion in doc.sections:
         if seccion.header:
           for p in seccion.header.paragraphs:
             p_text = p.text.strip()
-            if "carpeta" in p_text.lower():
-              if (
-                  carpeta_solicitud != "NO DETECTADO"
-                  and carpeta_solicitud.lower() not in p_text.lower()
-              ):
+            if "carpeta" in p_text.lower() and carpeta_solicitud != "NO DETECTADO":
+              if carpeta_solicitud.lower() not in p_text.lower():
                 p.add_run(
-                    f" [ERROR: EN SOLICITUD CONSTA {carpeta_solicitud}]"
+                    f" [⚠️ ERROR COTEJO: En solicitud consta"
+                    f" {carpeta_solicitud}]"
                 )
                 for r in p.runs:
                   r.font.highlight_color = WD_COLOR_INDEX.YELLOW
+                observaciones_cotejo.append(
+                    f"Carpeta de investigación no coincide con la solicitud"
+                    f" ({carpeta_solicitud})."
+                )
     except Exception:
       pass
 
-    # B. Revisión de Párrafos del Cuerpo
-    tiene_ecatepec = False
-    tiene_iztapalapa = False
-
+    # B. Revisión Párrafo por Párrafo
     for i, p in enumerate(doc.paragraphs, start=1):
       txt = p.text.strip()
       if not txt:
         continue
 
       txt_lower = txt.lower()
+      txt_limpio = quitar_acentos(txt_lower)
       texto_word_completo += " " + txt_lower
 
-      if "ecatepec" in txt_lower:
-        tiene_ecatepec = True
-      if "iztapalapa" in txt_lower:
-        tiene_iztapalapa = True
+      # --- REGLA DE ALINEACIÓN ---
+      # Excepciones que DEBEN ir CENTRADAS
+      es_palabra_dictamen = "dictamen" in txt_limpio.replace(" ", "") and len(txt) < 30
+      es_atentamente = "atentamente" in txt_limpio and len(txt) < 30
+      es_perito = "perito en criminalistica" in txt_limpio
+      
+      # Si contiene el bloque de firma o nombre propio en áreas de cierre
+      es_bloque_firma = es_palabra_dictamen or es_atentamente or es_perito
 
-      # Revisión Ortográfica: "Rocío"
-      txt_sin_acentos = quitar_acentos(txt_lower)
-      if ("maritza" in txt_sin_acentos or "ramirez" in txt_sin_acentos) and (
-          "rocio" in txt_sin_acentos
-      ):
-        for r in p.runs:
-          if "rocio" in quitar_acentos(r.text.lower()):
-            r.font.highlight_color = WD_COLOR_INDEX.YELLOW
-        palabras_sospechosas.append(
-            f"Párrafo {i}: Verificar acentuación del nombre 'Rocío'."
-        )
-
-      # --- CENTRADO OBLIGATORIO DE 'DICTAMEN' Y RUBROS ---
-      # Comprobación de palabras limpias de espacios
-      txt_compacto = txt_lower.replace(" ", "")
-      es_palabra_dictamen = "dictamen" in txt_compacto and len(txt) < 30
-
-      es_centrado = es_palabra_dictamen or any(
-          kw in txt_lower
-          for kw in ["atentamente", "nombre y firma", "dictamen pericial"]
-      )
-
-      if es_centrado:
+      if es_bloque_firma:
         if p.alignment != WD_ALIGN_PARAGRAPH.CENTER:
           p.alignment = WD_ALIGN_PARAGRAPH.CENTER
           for r in p.runs:
             r.font.highlight_color = WD_COLOR_INDEX.YELLOW
-          alertas_diseno.append(
-              f"Párrafo {i}: La palabra '{txt[:30]}' debe ir CENTRADA (se"
-              " corrigió en el archivo)."
+          alertas_alineacion.append(
+              f"Párrafo {i}: '{txt[:35]}...' debe estar CENTRADO (se corrigió"
+              " en el archivo)."
           )
-      elif len(txt) > 80:
-        if (
-            p.alignment is not None
-            and p.alignment != WD_ALIGN_PARAGRAPH.JUSTIFY
-        ):
+      else:
+        # Cualquier otro párrafo debe ser JUSTIFICADO
+        if len(txt) > 40 and p.alignment != WD_ALIGN_PARAGRAPH.JUSTIFY:
+          p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
           for r in p.runs:
             r.font.highlight_color = WD_COLOR_INDEX.YELLOW
-          alertas_diseno.append(f"Párrafo {i}: Debe ir JUSTIFICADO.")
+          alertas_alineacion.append(
+              f"Párrafo {i}: Párrafo no justificado (se aplicó alineación"
+              " JUSTIFICADA)."
+          )
 
-      # Contradicción Geográfica
+      # --- COTEJO DE REMITENTE Y OFICIO EN EL CUERPO ---
       if (
-          tiene_ecatepec
-          and tiene_iztapalapa
-          and "iztapalapa" in txt_lower
-          and "[CONTRADICCIÓN" not in txt
+          remitente_solicitud != "NO DETECTADO"
+          and "atencion" in txt_limpio
+          or "solicitante" in txt_limpio
       ):
-        p.add_run(
-            " [CONTRADICCIÓN DE PLANTILLA: Se detectó Ecatepec e Iztapalapa en"
-            " el texto.]"
+        nombre_remitente_limpio = quitar_acentos(
+            remitente_solicitud.split()[-1].lower()
         )
-        for r in p.runs:
-          r.font.highlight_color = WD_COLOR_INDEX.YELLOW
+        if (
+            len(nombre_remitente_limpio) > 3
+            and nombre_remitente_limpio not in txt_limpio
+        ):
+          p.add_run(
+              f" [⚠️ REVISAR REMITENTE: En solicitud consta"
+              f" {remitente_solicitud}]"
+          )
+          for r in r_p in p.runs:
+            r_p.font.highlight_color = WD_COLOR_INDEX.YELLOW
 
   # --- MOSTRAR RESULTADOS ---
-  st.success("Auditoría completada exitosamente")
+  st.success("🎉 ¡Auditoría completada!")
   st.divider()
 
-  st.subheader("1. Reporte de Diseño y Formalidad")
-  if alertas_diseno:
-    for al in list(set(alertas_diseno))[:5]:
-      st.write(al)
+  # 1. COTEJO DE INFORMACIÓN CRUZADA
+  st.subheader("🕵️‍♂️ 1. Cotejo de Datos (PDF Solicitud vs. Word Dictamen)")
+  col1, col2, col3 = st.columns(3)
+  col1.metric("Carpeta de Inv.", carpeta_solicitud)
+  col2.metric("Oficio Solicitud", oficio_solicitud)
+  col3.metric("Remitente (Envía)", remitente_solicitud)
+
+  if observaciones_cotejo:
+    for obs in observaciones_cotejo:
+      st.error(f"❌ {obs}")
   else:
-    st.success("Estructura formal correcta.")
+    st.info("Los datos clave del PDF fueron comparados con el documento Word.")
 
   st.divider()
 
-  st.subheader("2. Validación Cruzada (PDF vs. Word)")
-  col1, col2 = st.columns(2)
-  col1.info(f"Oficio PDF: {oficio_solicitud}")
-  col2.info(f"Carpeta PDF: {carpeta_solicitud}")
-
-  st.subheader("3. Reporte Ortográfico")
-  if palabras_sospechosas:
-    for ps in set(palabras_sospechosas):
-      st.write(f"* {ps}")
+  # 2. ALINEACIÓN Y FORMATO
+  st.subheader("📐 2. Reporte de Formato y Alineaciones")
+  if alertas_alineacion:
+    for al in list(set(alertas_alineacion))[:6]:
+      st.write(f"* {al}")
   else:
-    st.success("Sin faltas ortográficas detectadas en nombres de personal.")
-
-  # Rubros Faltantes
-  rubros_faltantes = []
-  txt_completo_clean = quitar_acentos(texto_word_completo)
-  for rubro in RUBROS_BASE:
-    if quitar_acentos(rubro) not in txt_completo_clean:
-      rubros_faltantes.append(rubro.upper())
-
-  if rubros_faltantes:
-    st.error(
-        f"Faltan los siguientes rubros obligatorios: {', '.join(rubros_faltantes)}"
-    )
+    st.success("Alineaciones correctas (Justificados y Centrados requeridos cumplidos).")
 
   st.divider()
 
-  # Botón para descargar el Word modificado
-  st.subheader("Descargar documento auditado")
+  # 3. DESCARGA
+  st.subheader("📥 3. Descargar Word Auditado")
   bio = io.BytesIO()
   doc.save(bio)
   bio.seek(0)
 
   st.download_button(
-      label="Descargar Word con Marcas de Error",
+      label="📥 Descargar Word con Correcciones y Marcas",
       data=bio,
       file_name="DICTAMEN_AUDITADO.docx",
       mime=(
           "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
       ),
+  )
+else:
+  st.warning("💡 Por favor, sube ambos archivos para iniciar la auditoría.")

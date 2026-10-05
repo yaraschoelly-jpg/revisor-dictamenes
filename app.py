@@ -46,47 +46,51 @@ if archivo_pdf is not None and archivo_docx is not None:
       for pag in lector_pdf.pages:
         txt_pag = pag.extract_text()
         if txt_pag:
-          texto_pdf += " " + txt_pag
+          texto_pdf += "\n" + txt_pag
     except Exception as e:
       st.error(f"Error al leer el PDF: {e}")
 
-    # Extracción de Carpeta de Investigación
+    # Búsquedas Flexibles (Sensibles a múltiples patrones oficiales)
     match_carpeta = re.search(
-        r"(FED|CUI|EXP|CP|CI|CAUSA|AP)[/\-\w\d\.]+", texto_pdf, re.IGNORECASE
-    )
-    carpeta_solicitud = (
-        match_carpeta.group(0).upper() if match_carpeta else "NO DETECTADO"
-    )
-
-    # Extracción de Número de Folio
-    match_folio = re.search(
-        r"(FOLIO|FOLIO\s*NÚMERO|FOLIO\s*NO\.?)\s*[:\.\-]?\s*([A-Z0-9/\-]+)",
+        r"(carpeta|expediente|causa|cui|ap|ci)\s*[\w\d\.\-/:]+",
         texto_pdf,
         re.IGNORECASE,
     )
-    if not match_folio:
-      # Búsqueda alternativa para secuencias numéricas de folio de 5 a 8 dígitos
-      match_folio = re.search(r"\b\d{5,8}\b", texto_pdf)
-      folio_solicitud = match_folio.group(0) if match_folio else "NO DETECTADO"
-    else:
-      folio_solicitud = match_folio.group(2).upper()
+    if not match_carpeta:
+      match_carpeta = re.search(
+          r"[A-Z0-9]{2,8}/[A-Z0-9/\-_]{4,25}", texto_pdf
+      )
+    carpeta_solicitud = (
+        match_carpeta.group(0).upper().strip() if match_carpeta else "NO DETECTADO"
+    )
 
-    # Extracción de Número de Oficio
+    match_folio = re.search(
+        r"(folio)\s*[\w\d\.\-:]+", texto_pdf, re.IGNORECASE
+    )
+    if not match_folio:
+      match_folio = re.search(r"\b\d{5,8}\b", texto_pdf)
+    folio_solicitud = (
+        match_folio.group(0).upper().strip() if match_folio else "NO DETECTADO"
+    )
+
     match_oficio = re.search(
-        r"(FGR|AIC|PFM|UINP|SUB|OFICIO)[/\-\w\d]+", texto_pdf, re.IGNORECASE
+        r"(oficio|fgr|aic|pfm|uinp|sub)\s*[\w\d\.\-/:]+",
+        texto_pdf,
+        re.IGNORECASE,
     )
     oficio_solicitud = (
-        match_oficio.group(0).upper() if match_oficio else "NO DETECTADO"
+        match_oficio.group(0).upper().strip() if match_oficio else "NO DETECTADO"
     )
 
-    # Extracción del Remitente
     match_remitente = re.search(
-        r"(LIC\.|MTRO\.|MTRA\.|DR\.|DRA\.|LICENCIADO|LICENCIADA)\s+([A-ZÁÉÍÓÚÑ\s]+)",
+        r"(lic\.|mtro\.|mtra\.|dr\.|dra\.|licenciado|licenciada|c\.)\s+([a-záéíóúñ\s]+)",
         texto_pdf,
         re.IGNORECASE,
     )
     remitente_solicitud = (
-        match_remitente.group(0).strip() if match_remitente else "NO DETECTADO"
+        match_remitente.group(0).strip().upper()
+        if match_remitente
+        else "NO DETECTADO"
     )
 
     # --- 2. AUDITORÍA EN WORD (DICTAMEN) ---
@@ -104,7 +108,6 @@ if archivo_pdf is not None and archivo_docx is not None:
           for p in paragraphs_header:
             header_text += " " + p.text.strip().lower()
 
-          # Validar Carpeta de Investigación en Encabezado
           if carpeta_solicitud != "NO DETECTADO":
             carpeta_clean = re.sub(r"[^\w]", "", carpeta_solicitud.lower())
             header_clean = re.sub(r"[^\w]", "", header_text)
@@ -118,11 +121,9 @@ if archivo_pdf is not None and archivo_docx is not None:
                 for r in p_target.runs:
                   r.font.highlight_color = WD_COLOR_INDEX.YELLOW
               observaciones_cotejo.append(
-                  f"Carpeta de investigación en encabezado difiere o no consta"
-                  f" ({carpeta_solicitud})."
+                  f"Carpeta de investigación difiere o no consta ({carpeta_solicitud})."
               )
 
-          # Validar Número de Folio en Encabezado
           if folio_solicitud != "NO DETECTADO":
             folio_clean = re.sub(r"[^\w]", "", folio_solicitud.lower())
             header_clean = re.sub(r"[^\w]", "", header_text)
@@ -136,10 +137,9 @@ if archivo_pdf is not None and archivo_docx is not None:
                 for r in p_target.runs:
                   r.font.highlight_color = WD_COLOR_INDEX.YELLOW
               observaciones_cotejo.append(
-                  f"Número de folio en encabezado difiere o no consta"
-                  f" ({folio_solicitud})."
+                  f"Número de folio difiere o no consta ({folio_solicitud})."
               )
-    except Exception as e:
+    except Exception:
       pass
 
     # B. Revisión Párrafo por Párrafo del Cuerpo
@@ -152,23 +152,19 @@ if archivo_pdf is not None and archivo_docx is not None:
       txt_limpio = quitar_acentos(txt_lower)
       texto_word_completo += " " + txt_lower
 
-      # --- REGLAS DE ALINEACIÓN ---
-
-      # 1. ELEMENTOS A LA DERECHA
+      # REGLAS DE ALINEACIÓN
       es_asunto = "asunto:" in txt_limpio or "se emite dictamen" in txt_limpio
       es_leyenda_oficial = "margarita maza parada" in txt_limpio or "ano de" in txt_limpio
       es_fecha = bool(re.search(r'\b(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\b', txt_limpio)) and len(txt) < 60
 
       es_derecha = es_asunto or es_leyenda_oficial or es_fecha
 
-      # 2. ELEMENTOS AL CENTRO
       es_palabra_dictamen = "dictamen" in txt_limpio.replace(" ", "") and len(txt) < 30
       es_atentamente = "atentamente" in txt_limpio and len(txt) < 30
       es_perito = "perito en criminalistica" in txt_limpio
 
       es_centrado = es_palabra_dictamen or es_atentamente or es_perito
 
-      # EVALUACIÓN Y CORRECCIÓN DE ALINEACIONES
       if es_derecha:
         if p.alignment != WD_ALIGN_PARAGRAPH.RIGHT:
           p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
@@ -188,7 +184,6 @@ if archivo_pdf is not None and archivo_docx is not None:
           )
 
       else:
-        # CUALQUIER OTRO PÁRRAFO LIBRE DEBE SER JUSTIFICADO
         if len(txt) > 40 and p.alignment != WD_ALIGN_PARAGRAPH.JUSTIFY:
           p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
           for r in p.runs:
@@ -201,7 +196,6 @@ if archivo_pdf is not None and archivo_docx is not None:
   st.success("🎉 ¡Auditoría completada!")
   st.divider()
 
-  # 1. COTEJO DE INFORMACIÓN CRUZADA
   st.subheader("🕵️‍♂️ 1. Datos Extraídos del PDF de Solicitud")
   col1, col2, col3, col4 = st.columns(4)
   col1.metric("Carpeta Inv.", carpeta_solicitud)
@@ -209,16 +203,23 @@ if archivo_pdf is not None and archivo_docx is not None:
   col3.metric("Oficio", oficio_solicitud)
   col4.metric("Remitente", remitente_solicitud)
 
+  # Visor de Depuración de Texto del PDF
+  with st.expander("🔍 Ver texto extraído directamente del PDF de Solicitud"):
+    if texto_pdf.strip():
+      st.text(texto_pdf)
+    else:
+      st.warning(
+          "El PDF no contiene texto legible (posiblemente es una imagen"
+          " escaneada)."
+      )
+
   if observaciones_cotejo:
     st.subheader("⚠️ Observaciones de Encabezado y Cotejo")
     for obs in set(observaciones_cotejo):
       st.error(f"❌ {obs}")
-  else:
-    st.info("Los datos del encabezado coinciden con la solicitud en PDF.")
 
   st.divider()
 
-  # 2. ALINEACIÓN Y FORMATO
   st.subheader("📐 2. Reporte de Formato y Alineaciones")
   if alertas_alineacion:
     for al in list(set(alertas_alineacion))[:8]:
@@ -228,7 +229,6 @@ if archivo_pdf is not None and archivo_docx is not None:
 
   st.divider()
 
-  # 3. DESCARGA
   st.subheader("📥 3. Descargar Word Auditado")
   bio = io.BytesIO()
   doc.save(bio)

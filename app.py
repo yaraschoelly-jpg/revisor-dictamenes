@@ -17,15 +17,41 @@ def quitar_acentos(texto):
   return "".join(c for c in texto_norm if unicodedata.category(c) != "Mn")
 
 
+def corregir_ortografia_texto(texto):
+  # Lista de correcciones técnicas comunes en dictámenes
+  correcciones = {
+      r"\bcaracteristicas\b": "características",
+      r"\bfisica\b": "física",
+      r"\bfisicas\b": "físicas",
+      r"\bubicacion\b": "ubicación",
+      r"\bdescripcion\b": "descripción",
+      r"\bobservacion\b": "observación",
+      r"\bobservaciones\b": "observaciones",
+      r"\bconsideracion\b": "consideración",
+      r"\bconsideraciones\b": "consideraciones",
+      r"\bconclusion\b": "conclusión",
+      r"\bconclusiones\b": "conclusiones",
+      r"\bindicio\b": "indicio",
+      r"\bindicios\b": "indicios",
+      r"\btecnica\b": "técnica",
+      r"\btecnico\b": "técnico",
+  }
+  texto_corregido = texto
+  for patron, reemplazo in correcciones.items():
+    texto_corregido = re.sub(
+        patron, reemplazo, texto_corregido, flags=re.IGNORECASE
+    )
+  return texto_corregido
+
+
 st.set_page_config(
     page_title="Auditor Pericial Integral", page_icon="⚖️", layout="centered"
 )
 
-st.title("⚖️ Auditor Pericial de Formalidad y Cotejo")
+st.title("⚖️ Auditor Pericial de Formalidad y Sintaxis")
 st.write(
     "Sube el **PDF de Solicitud** y el **Word del Dictamen** para auditar"
-    " encabezados, ubicación de 'PRESENTE', alineación de imágenes, redacción y"
-    " formato."
+    " ortografía, sintaxis, alineaciones y cotejo de datos."
 )
 
 st.subheader("1. Carga de Documentos Oficiales")
@@ -40,7 +66,7 @@ with col_docx:
 
 if archivo_pdf is not None and archivo_docx is not None:
   with st.spinner(
-      "Procesando y realizando OCR en documentos... Por favor, espera."
+      "Procesando, realizando OCR y auditando sintaxis... Por favor, espera."
   ):
 
     # --- 1. LECTURA DIGITAL + MOTOR OCR ---
@@ -111,6 +137,7 @@ if archivo_pdf is not None and archivo_docx is not None:
     doc = docx.Document(archivo_docx)
     texto_word_completo = ""
     alertas_alineacion = []
+    alertas_ortografia = []
     observaciones_cotejo = []
 
     # A. Auditando Encabezado
@@ -177,43 +204,48 @@ if archivo_pdf is not None and archivo_docx is not None:
     # C. Revisión Párrafo por Párrafo del Cuerpo
     for idx, p in enumerate(doc.paragraphs, start=1):
       txt = p.text.strip()
-      
-      # Detección de imágenes/fotografías dentro del párrafo
+
+      # Detección de imágenes/fotografías
       tiene_imagen = len(p._element.xpath('.//w:drawing | .//w:pict')) > 0
 
       txt_lower = txt.lower()
       txt_limpio = quitar_acentos(txt_lower)
       texto_word_completo += " " + txt_lower
 
-      # REGLA 1: "PRESENTE" (Alineado a la Izquierda con Interlineado 1.0)
-      es_presente = txt_limpio.replace(" ", "") == "presente"
+      # CORRECCIÓN DE ORTOGRAFÍA / SINTAXIS
+      txt_corregido = corregir_ortografia_texto(txt)
+      if txt_corregido != txt:
+        p.text = txt_corregido
+        alertas_ortografia.append(
+            f"Párrafo {idx}: Se corrigió la ortografía/acentuación del texto."
+        )
 
+      # REGLA 1: "PRESENTE"
+      es_presente = txt_limpio.replace(" ", "") == "presente"
       if es_presente:
         p.alignment = WD_ALIGN_PARAGRAPH.LEFT
         p.paragraph_format.line_spacing = 1.0
         p.paragraph_format.space_after = Pt(0)
-        alertas_alineacion.append(
-            f"Párrafo {idx}: 'PRESENTE' se alineó a la izquierda con espaciado de 1.00 sin saltos posteriores."
-        )
         continue
 
       if not txt and not tiene_imagen:
         continue
 
-      # REGLA 2: FOTOGRAFÍAS E IMÁGENES Y NOMBRES/PIES DE FOTO
+      # REGLA 2: FOTOGRAFÍAS / PIES DE FOTO
       es_nombre_fotografia = any(
           txt_limpio.startswith(prefix)
-          for prefix in ["fotografia", "foto", "figura", "imagen", "grafica", "iluminacion"]
+          for prefix in [
+              "fotografia",
+              "foto",
+              "figura",
+              "imagen",
+              "grafica",
+              "iluminacion",
+          ]
       )
 
       if tiene_imagen or es_nombre_fotografia:
-        if p.alignment != WD_ALIGN_PARAGRAPH.CENTER:
-          p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-          for r in p.runs:
-            r.font.highlight_color = WD_COLOR_INDEX.YELLOW
-          alertas_alineacion.append(
-              f"Párrafo {idx}: Imagen/Fotografía o pie de foto '{txt[:35]}...' alineado al CENTRO."
-          )
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         continue
 
       # REGLA 3: ELEMENTOS A LA DERECHA
@@ -232,31 +264,12 @@ if archivo_pdf is not None and archivo_docx is not None:
 
       # APLICACIÓN DE ALINEACIONES
       if es_derecha:
-        if p.alignment != WD_ALIGN_PARAGRAPH.RIGHT:
-          p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-          for r in p.runs:
-            r.font.highlight_color = WD_COLOR_INDEX.YELLOW
-          alertas_alineacion.append(
-              f"Párrafo {idx}: '{txt[:35]}...' alineado A LA DERECHA."
-          )
-
+        p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
       elif es_centrado:
-        if p.alignment != WD_ALIGN_PARAGRAPH.CENTER:
-          p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-          for r in p.runs:
-            r.font.highlight_color = WD_COLOR_INDEX.YELLOW
-          alertas_alineacion.append(
-              f"Párrafo {idx}: '{txt[:35]}...' alineado AL CENTRO."
-          )
-
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
       else:
-        if len(txt) > 40 and p.alignment != WD_ALIGN_PARAGRAPH.JUSTIFY:
+        if len(txt) > 40:
           p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-          for r in p.runs:
-            r.font.highlight_color = WD_COLOR_INDEX.YELLOW
-          alertas_alineacion.append(
-              f"Párrafo {idx}: Alineación ajustada a JUSTIFICADO."
-          )
 
   # --- MOSTRAR RESULTADOS ---
   st.success("🎉 ¡Auditoría completada!")
@@ -269,12 +282,6 @@ if archivo_pdf is not None and archivo_docx is not None:
   col3.metric("Oficio", oficio_solicitud)
   col4.metric("Remitente", remitente_solicitud)
 
-  with st.expander("🔍 Ver texto extraído por OCR del PDF (Verificación)"):
-    if texto_pdf.strip():
-      st.text(texto_pdf)
-    else:
-      st.warning("No se pudo extraer texto ni con OCR. Verifica la imagen.")
-
   if observaciones_cotejo:
     st.subheader("⚠️ Observaciones de Encabezado y Cotejo")
     for obs in set(observaciones_cotejo):
@@ -282,24 +289,26 @@ if archivo_pdf is not None and archivo_docx is not None:
 
   st.divider()
 
-  st.subheader("📐 2. Reporte de Formato y Alineaciones")
-  if alertas_alineacion:
-    for al in list(set(alertas_alineacion))[:10]:
-      st.write(f"* {al}")
+  st.subheader("📝 2. Reporte de Correcciones Ortográficas y Sintaxis")
+  if alertas_ortografia:
+    for ao in list(set(alertas_ortografia))[:8]:
+      st.info(f"✔️ {ao}")
   else:
-    st.success("Alineaciones y centrado de imágenes/pies de foto correctos.")
+    st.success(
+        "No se detectaron faltas de acentuación técnica en palabras clave."
+    )
 
   st.divider()
 
-  st.subheader("📥 3. Descargar Word Auditado")
+  st.subheader("📥 3. Descargar Word Auditado y Corregido")
   bio = io.BytesIO()
   doc.save(bio)
   bio.seek(0)
 
   st.download_button(
-      label="📥 Descargar Word con Correcciones y Marcas",
+      label="📥 Descargar Word con Correcciones Aplicadas",
       data=bio,
-      file_name="DICTAMEN_AUDITADO.docx",
+      file_name="DICTAMEN_AUDITADO_Y_CORREGIDO.docx",
       mime=(
           "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
       ),

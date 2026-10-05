@@ -3,6 +3,7 @@ import re
 import unicodedata
 import docx
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_COLOR_INDEX
+from docx.shared import Pt
 import pdfplumber
 from pdf2image import convert_from_bytes
 import pytesseract
@@ -23,7 +24,8 @@ st.set_page_config(
 st.title("⚖️ Auditor Pericial de Formalidad y Cotejo")
 st.write(
     "Sube el **PDF de Solicitud** y el **Word del Dictamen** para auditar"
-    " encabezados, ubicación de destinatario, redacción y formato."
+    " encabezados, ubicación de 'PRESENTE', alineación de imágenes, redacción y"
+    " formato."
 )
 
 st.subheader("1. Carga de Documentos Oficiales")
@@ -154,7 +156,7 @@ if archivo_pdf is not None and archivo_docx is not None:
     except Exception:
       pass
 
-    # B. Eliminación de espacios en blanco antes de "PRESENTE"
+    # B. Limpieza de Espacios antes de "PRESENTE"
     parrafos = doc.paragraphs
     i = 0
     while i < len(parrafos):
@@ -162,13 +164,12 @@ if archivo_pdf is not None and archivo_docx is not None:
       txt_limpio_p = quitar_acentos(txt_p.lower()).replace(" ", "")
 
       if txt_limpio_p == "presente":
-        # Revisar párrafos anteriores en blanco y eliminarlos
         j = i - 1
         while j >= 0 and not parrafos[j].text.strip():
           p_element = parrafos[j]._element
           p_element.getparent().remove(p_element)
           alertas_alineacion.append(
-              f"Se eliminó un espacio en blanco innecesario antes de la palabra 'PRESENTE'."
+              "Se eliminaron espacios vacíos previos a la palabra 'PRESENTE'."
           )
           j -= 1
       i += 1
@@ -176,39 +177,61 @@ if archivo_pdf is not None and archivo_docx is not None:
     # C. Revisión Párrafo por Párrafo del Cuerpo
     for idx, p in enumerate(doc.paragraphs, start=1):
       txt = p.text.strip()
-      if not txt:
-        continue
+      
+      # Detección de imágenes/fotografías dentro del párrafo (Inline Shapes)
+      tiene_imagen = len(p._element.xpath('.//w:drawing | .//w:pict')) > 0
 
       txt_lower = txt.lower()
       txt_limpio = quitar_acentos(txt_lower)
       texto_word_completo += " " + txt_lower
 
-      # --- REGLAS DE ALINEACIÓN ---
+      # REGLA 1: "PRESENTE" (Alineado a la Izquierda con Espaciado Sencillo 1.0)
+      es_presente = txt_limpio.replace(" ", "") == "presente"
 
-      # 1. ELEMENTOS A LA DERECHA
+      if es_presente:
+        p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        p.paragraph_format.line_spacing = 1.0
+        p.paragraph_format.space_after = Pt(0)
+        alertas_alineacion.append(
+            f"Párrafo {idx}: 'PRESENTE' se alineó a la izquierda con espaciado de 1.00 sin saltos posteriores."
+        )
+        continue
+
+      if not txt and not tiene_imagen:
+        continue
+
+      # REGLA 2: FOTOGRAFÍAS E IMÁGENES Y NOMBRES/PIES DE FOTO
+      es_nombre_fotografia = any(
+          txt_limpio.startswith(prefix)
+          for prefix in ["fotografia", "foto", "figura", "imagen", "grafica", "iluminacion"]
+      )
+
+      if tiene_imagen or es_nombre_fotografia:
+        if p.alignment != WD_ALIGN_PARAGRAPH.CENTER:
+          p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+          for r in p.runs:
+            r.font.highlight_color = WD_COLOR_INDEX.YELLOW
+          alertas_alineacion.append(
+              f"Párrafo {idx}: Imagen/Fotografía o pie de foto '{txt[:35]}...' alineado al CENTRO."
+          )
+        continue
+
+      # REGLA 3: ELEMENTOS A LA DERECHA
       es_asunto = "asunto:" in txt_limpio or "se emite dictamen" in txt_limpio
       es_leyenda_oficial = "margarita maza parada" in txt_limpio or "ano de" in txt_limpio
       es_fecha = bool(re.search(r'\b(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\b', txt_limpio)) and len(txt) < 60
 
       es_derecha = es_asunto or es_leyenda_oficial or es_fecha
 
-      # 2. ELEMENTOS AL CENTRO
+      # REGLA 4: ELEMENTOS AL CENTRO
       es_palabra_dictamen = "dictamen" in txt_limpio.replace(" ", "") and len(txt) < 30
       es_atentamente = "atentamente" in txt_limpio and len(txt) < 30
       es_perito = "perito en criminalistica" in txt_limpio
 
       es_centrado = es_palabra_dictamen or es_atentamente or es_perito
 
-      # 3. REGLA ESPECÍFICA "PRESENTE" (Izquierda / Debajo del Destinatario)
-      es_presente = txt_limpio.replace(" ", "") == "presente"
-
-      if es_presente:
-        p.alignment = WD_ALIGN_PARAGRAPH.LEFT
-        alertas_alineacion.append(
-            f"Párrafo {idx}: La palabra 'PRESENTE' se alineó correctamente debajo de la autoridad solicitante sin espacios intermedios."
-        )
-
-      elif es_derecha:
+      # APLICACIÓN DE ALINEACIONES
+      if es_derecha:
         if p.alignment != WD_ALIGN_PARAGRAPH.RIGHT:
           p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
           for r in p.runs:
@@ -253,7 +276,7 @@ if archivo_pdf is not None and archivo_docx is not None:
       st.warning("No se pudo extraer texto ni con OCR. Verifica la imagen.")
 
   if observaciones_cotejo:
-    st.subheader("⚠️️ Observaciones de Encabezado y Cotejo")
+    st.subheader("⚠️ Observaciones de Encabezado y Cotejo")
     for obs in set(observaciones_cotejo):
       st.error(f"❌ {obs}")
 
@@ -261,25 +284,4 @@ if archivo_pdf is not None and archivo_docx is not None:
 
   st.subheader("📐 2. Reporte de Formato y Alineaciones")
   if alertas_alineacion:
-    for al in list(set(alertas_alineacion))[:8]:
-      st.write(f"* {al}")
-  else:
-    st.success("Alineaciones correctas (Derecha, Centro, Presente y Justificado).")
-
-  st.divider()
-
-  st.subheader("📥 3. Descargar Word Auditado")
-  bio = io.BytesIO()
-  doc.save(bio)
-  bio.seek(0)
-
-  st.download_button(
-      label="📥 Descargar Word con Correcciones y Marcas",
-      data=bio,
-      file_name="DICTAMEN_AUDITADO.docx",
-      mime=(
-          "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-      ),
-  )
-else:
-  st.warning("💡 Por favor, sube ambos archivos para iniciar la auditoría.")
+    for al in list(set(alertas_alineacion))

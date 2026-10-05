@@ -132,5 +132,96 @@ if archivo_pdf is not None and archivo_docx is not None:
         )
 
       # --- CENTRADO OBLIGATORIO DE 'DICTAMEN' Y RUBROS ---
-      es_palabra_dictamen = bool(
-          re.search(r"\bd\s*i\s*c\s
+      # Comprobación de palabras limpias de espacios
+      txt_compacto = txt_lower.replace(" ", "")
+      es_palabra_dictamen = "dictamen" in txt_compacto and len(txt) < 30
+
+      es_centrado = es_palabra_dictamen or any(
+          kw in txt_lower
+          for kw in ["atentamente", "nombre y firma", "dictamen pericial"]
+      )
+
+      if es_centrado:
+        if p.alignment != WD_ALIGN_PARAGRAPH.CENTER:
+          p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+          for r in p.runs:
+            r.font.highlight_color = WD_COLOR_INDEX.YELLOW
+          alertas_diseno.append(
+              f"Párrafo {i}: La palabra '{txt[:30]}' debe ir CENTRADA (se"
+              " corrigió en el archivo)."
+          )
+      elif len(txt) > 80:
+        if (
+            p.alignment is not None
+            and p.alignment != WD_ALIGN_PARAGRAPH.JUSTIFY
+        ):
+          for r in p.runs:
+            r.font.highlight_color = WD_COLOR_INDEX.YELLOW
+          alertas_diseno.append(f"Párrafo {i}: Debe ir JUSTIFICADO.")
+
+      # Contradicción Geográfica
+      if (
+          tiene_ecatepec
+          and tiene_iztapalapa
+          and "iztapalapa" in txt_lower
+          and "[CONTRADICCIÓN" not in txt
+      ):
+        p.add_run(
+            " [CONTRADICCIÓN DE PLANTILLA: Se detectó Ecatepec e Iztapalapa en"
+            " el texto.]"
+        )
+        for r in p.runs:
+          r.font.highlight_color = WD_COLOR_INDEX.YELLOW
+
+  # --- MOSTRAR RESULTADOS ---
+  st.success("Auditoría completada exitosamente")
+  st.divider()
+
+  st.subheader("1. Reporte de Diseño y Formalidad")
+  if alertas_diseno:
+    for al in list(set(alertas_diseno))[:5]:
+      st.write(al)
+  else:
+    st.success("Estructura formal correcta.")
+
+  st.divider()
+
+  st.subheader("2. Validación Cruzada (PDF vs. Word)")
+  col1, col2 = st.columns(2)
+  col1.info(f"Oficio PDF: {oficio_solicitud}")
+  col2.info(f"Carpeta PDF: {carpeta_solicitud}")
+
+  st.subheader("3. Reporte Ortográfico")
+  if palabras_sospechosas:
+    for ps in set(palabras_sospechosas):
+      st.write(f"* {ps}")
+  else:
+    st.success("Sin faltas ortográficas detectadas en nombres de personal.")
+
+  # Rubros Faltantes
+  rubros_faltantes = []
+  txt_completo_clean = quitar_acentos(texto_word_completo)
+  for rubro in RUBROS_BASE:
+    if quitar_acentos(rubro) not in txt_completo_clean:
+      rubros_faltantes.append(rubro.upper())
+
+  if rubros_faltantes:
+    st.error(
+        f"Faltan los siguientes rubros obligatorios: {', '.join(rubros_faltantes)}"
+    )
+
+  st.divider()
+
+  # Botón para descargar el Word modificado
+  st.subheader("Descargar documento auditado")
+  bio = io.BytesIO()
+  doc.save(bio)
+  bio.seek(0)
+
+  st.download_button(
+      label="Descargar Word con Marcas de Error",
+      data=bio,
+      file_name="DICTAMEN_AUDITADO.docx",
+      mime=(
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      ),

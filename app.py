@@ -53,7 +53,7 @@ if archivo_pdf is not None and archivo_docx is not None:
       " espera."
   ):
 
-    # --- 1. LECTURA RÁPIDA DEL PDF ---
+    # --- 1. LECTURA Y EXTRACCIÓN DEL PDF ---
     texto_pdf = ""
     try:
       lector_pdf = pypdf.PdfReader(archivo_pdf)
@@ -84,7 +84,7 @@ if archivo_pdf is not None and archivo_docx is not None:
     palabras_sospechosas = []
     alertas_diseno = []
 
-    # A. Revisión rápida de Encabezado
+    # A. Revisión del Encabezado
     try:
       for seccion in doc.sections:
         if seccion.header:
@@ -96,7 +96,7 @@ if archivo_pdf is not None and archivo_docx is not None:
                   and carpeta_solicitud.lower() not in p_text.lower()
               ):
                 p.add_run(
-                    f" [⚠️️ ERROR: EN SOLICITUD CONSTA {carpeta_solicitud}]"
+                    f" [⚠️ ERROR: EN SOLICITUD CONSTA {carpeta_solicitud}]"
                 )
                 for r in p.runs:
                   r.font.highlight_color = WD_COLOR_INDEX.YELLOW
@@ -120,7 +120,7 @@ if archivo_pdf is not None and archivo_docx is not None:
       if "iztapalapa" in txt_lower:
         tiene_iztapalapa = True
 
-      # Revisión Ortográfica: Nombre propio "Rocío"
+      # Revisión Ortográfica: "Rocío"
       txt_sin_acentos = quitar_acentos(txt_lower)
       if ("maritza" in txt_sin_acentos or "ramirez" in txt_sin_acentos) and (
           "rocio" in txt_sin_acentos
@@ -132,8 +132,7 @@ if archivo_pdf is not None and archivo_docx is not None:
             f"Párrafo {i}: Verificar acentuación del nombre 'Rocío'."
         )
 
-      # --- REVISIÓN DE ALINEACIÓN Y CENTRADO DE 'DICTAMEN' ---
-      # Evalúa 'dictamen' normal o con espacios intermedios 'd i c t a m e n'
+      # --- CENTRADO OBLIGATORIO DE 'DICTAMEN' Y RUBROS ---
       es_palabra_dictamen = bool(
           re.search(r"\bd\s*i\s*c\s*t\s*a\s*m\s*e\s*n\b", txt_lower)
       )
@@ -144,12 +143,12 @@ if archivo_pdf is not None and archivo_docx is not None:
 
       if es_centrado:
         if p.alignment != WD_ALIGN_PARAGRAPH.CENTER:
-          p.alignment = WD_ALIGN_PARAGRAPH.CENTER  # Fuerza el centrado en el documento generado
+          p.alignment = WD_ALIGN_PARAGRAPH.CENTER
           for r in p.runs:
             r.font.highlight_color = WD_COLOR_INDEX.YELLOW
           alertas_diseno.append(
-              f"❌ Párrafo {i}: La palabra *'{txt[:30]}'* no estaba centrada"
-              " (se corrigió y resaltó en amarillo)."
+              f"❌ Párrafo {i}: La palabra *'{txt[:30]}'* debe ir CENTRADA (se"
+              " corrigió en el archivo)."
           )
       elif len(txt) > 80:
         if (
@@ -178,20 +177,4 @@ if archivo_pdf is not None and archivo_docx is not None:
   st.success("✅ ¡Auditoría completada!")
   st.divider()
 
-  st.subheader("📐 1. Reporte de Diseño y Formalidad")
-  if alertas_diseno:
-    for al in list(set(alertas_diseno))[:5]:
-      st.write(al)
-  else:
-    st.success("Estructura formal correcta.")
-
-  st.divider()
-
-  st.subheader("🕵️‍♂️ 2. Validación Cruzada (PDF vs. Word)")
-  col1, col2 = st.columns(2)
-  col1.info(f"📄 **Oficio PDF:** {oficio_solicitud}")
-  col2.info(f"📂 **Carpeta PDF:** {carpeta_solicitud}")
-
-  st.subheader("📝 3. Reporte Ortográfico")
-  if palabras_sospechosas:
-    for ps in set(palabras_sospechosas
+  st.subheader("📐 1.

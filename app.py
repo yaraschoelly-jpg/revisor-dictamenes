@@ -9,7 +9,6 @@ from docx.shared import Pt
 import pdfplumber
 import streamlit as st
 
-# Opcionales con try/except para evitar fallos de importación
 try:
     from pdf2image import convert_from_bytes
     import pytesseract
@@ -26,7 +25,6 @@ def quitar_acentos(texto):
 
 
 def activar_control_de_cambios(doc):
-    """Activa el control de cambios en el archivo Word."""
     try:
         settings = doc.settings._element
         track_revisions = settings.find(qn("w:trackRevisions"))
@@ -34,11 +32,10 @@ def activar_control_de_cambios(doc):
             track_revisions = OxmlElement("w:trackRevisions")
             settings.append(track_revisions)
     except Exception as e:
-        st.warning(f"No se pudo activar el control de cambios automáticamente: {e}")
+        st.warning(f"No se pudo activar el control de cambios automaticamente: {e}")
 
 
 def corregir_y_resaltar_ortografia(p, idx, alertas_ortografia):
-    """Detecta errores de sintaxis o acentuación técnica y los resalta."""
     correcciones = {
         r"\bcaracteristicas\b": "características",
         r"\bfisica\b": "física",
@@ -74,13 +71,13 @@ def corregir_y_resaltar_ortografia(p, idx, alertas_ortografia):
             for _, reemplazo in correcciones.items():
                 if reemplazo.lower() in run.text.lower():
                     run.font.highlight_color = WD_COLOR_INDEX.YELLOW
-        alertas_ortografia.append(f"Párrafo {idx}: Se subrayaron y corrigieron faltas de acentuación técnica.")
+        alertas_ortografia.append(f"Parrafo {idx}: Se subrayaron y corrigieron faltas de acentuacion tecnica.")
 
 
 st.set_page_config(page_title="Auditor Pericial Integral", page_icon="⚖️", layout="centered")
 
-st.title("⚖️ Auditor Pericial de Formalidad y Sintaxis")
-st.write("Sube el **PDF de Solicitud** y el **Word del Dictamen** para ejecutar la auditoría.")
+st.title("Auditor Pericial de Formalidad y Sintaxis")
+st.write("Sube el PDF de Solicitud y el Word del Dictamen para ejecutar la auditoria.")
 
 st.subheader("1. Carga de Documentos Oficiales")
 col_pdf, col_docx = st.columns(2)
@@ -91,9 +88,8 @@ with col_docx:
     archivo_docx = st.file_uploader("Subir Dictamen Pericial en Word (.docx)", type=["docx"])
 
 if archivo_pdf is not None and archivo_docx is not None:
-    st.info("🔄 Archivos recibidos. Procesando auditoría...")
+    st.info("Archivos recibidos. Procesando auditoria...")
 
-    # --- 1. EXTRACCIÓN DE TEXTO DEL PDF ---
     texto_pdf = ""
     try:
         archivo_pdf.seek(0)
@@ -105,7 +101,6 @@ if archivo_pdf is not None and archivo_docx is not None:
                 if t:
                     texto_pdf += "\n" + t
 
-        # Fallback a OCR si es PDF escaneado
         if not texto_pdf.strip() and HAS_OCR:
             try:
                 imagenes = convert_from_bytes(bytes_pdf)
@@ -117,7 +112,6 @@ if archivo_pdf is not None and archivo_docx is not None:
     except Exception as e:
         st.error(f"Error al leer el archivo PDF: {e}")
 
-    # Expresiones regulares para extracción
     match_carpeta = re.search(r"(carpeta|expediente|causa|cui|ap|ci)\s*[\w\d\.\-/:]+", texto_pdf, re.IGNORECASE)
     carpeta_solicitud = match_carpeta.group(0).upper().strip() if match_carpeta else "NO DETECTADO"
 
@@ -132,7 +126,6 @@ if archivo_pdf is not None and archivo_docx is not None:
     match_remitente = re.search(r"(lic\.|mtro\.|mtra\.|dr\.|dra\.|licenciado|licenciada|c\.)\s+([a-záéíóúñ\s]+)", texto_pdf, re.IGNORECASE)
     remitente_solicitud = match_remitente.group(0).strip().upper() if match_remitente else "NO DETECTADO"
 
-    # --- 2. AUDITORÍA EN WORD ---
     try:
         archivo_docx.seek(0)
         doc = docx.Document(archivo_docx)
@@ -142,7 +135,6 @@ if archivo_pdf is not None and archivo_docx is not None:
         alertas_ortografia = []
         observaciones_cotejo = []
 
-        # Limpieza de espacios antes de PRESENTE
         parrafos = doc.paragraphs
         i = 0
         while i < len(parrafos):
@@ -153,11 +145,10 @@ if archivo_pdf is not None and archivo_docx is not None:
                 while j >= 0 and not parrafos[j].text.strip():
                     p_element = parrafos[j]._element
                     p_element.getparent().remove(p_element)
-                    alertas_alineacion.append("Se eliminaron espacios vacíos previos a la palabra 'PRESENTE'.")
+                    alertas_alineacion.append("Se eliminaron espacios vacios previos a la palabra PRESENTE.")
                     j -= 1
             i += 1
 
-        # Revisión párrafo por párrafo
         for idx, p in enumerate(doc.paragraphs, start=1):
             txt = p.text.strip()
             tiene_imagen = len(p._element.xpath('.//w:drawing | .//w:pict')) > 0
@@ -167,7 +158,6 @@ if archivo_pdf is not None and archivo_docx is not None:
             if txt:
                 corregir_y_resaltar_ortografia(p, idx, alertas_ortografia)
 
-            # Regla PRESENTE
             if txt_limpio.replace(" ", "") == "presente":
                 p.alignment = WD_ALIGN_PARAGRAPH.LEFT
                 p.paragraph_format.line_spacing = 1.0
@@ -177,19 +167,16 @@ if archivo_pdf is not None and archivo_docx is not None:
             if not txt and not tiene_imagen:
                 continue
 
-            # Regla Fotografías
             es_nombre_fotografia = any(txt_limpio.startswith(prefix) for prefix in ["fotografia", "foto", "figura", "imagen", "grafica", "iluminacion"])
             if tiene_imagen or es_nombre_fotografia:
                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 continue
 
-            # Regla Derecha
             es_asunto = "asunto:" in txt_limpio or "se emite dictamen" in txt_limpio
             es_leyenda_oficial = "margarita maza parada" in txt_limpio or "ano de" in txt_limpio
             es_fecha = bool(re.search(r'\b(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\b', txt_limpio)) and len(txt) < 60
             es_derecha = es_asunto or es_leyenda_oficial or es_fecha
 
-            # Regla Centro
             es_palabra_dictamen = "dictamen" in txt_limpio.replace(" ", "") and len(txt) < 30
             es_atentamente = "atentamente" in txt_limpio and len(txt) < 30
             es_perito = "perito en criminalistica" in txt_limpio
@@ -203,11 +190,10 @@ if archivo_pdf is not None and archivo_docx is not None:
                 if len(txt) > 40:
                     p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
 
-        # --- MOSTRAR RESULTADOS ---
-        st.success("🎉 ¡Auditoría completada!")
+        st.success("Auditoria completada exitosamente")
         st.divider()
 
-        st.subheader("🕵️‍♂️ 1. Datos Extraídos del PDF")
+        st.subheader("1. Datos Extraidos del PDF")
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("Carpeta Inv.", carpeta_solicitud)
         col2.metric("Folio", folio_solicitud)
@@ -216,4 +202,29 @@ if archivo_pdf is not None and archivo_docx is not None:
 
         st.divider()
 
-        st.subheader("📝 2. Errores Gramatical
+        st.subheader("2. Errores Gramaticales y Ortograficos Detectados")
+        if alertas_ortografia:
+            for ao in list(set(alertas_ortografia))[:10]:
+                st.warning(ao)
+        else:
+            st.success("No se detectaron faltas de acentuacion tecnica en palabras clave.")
+
+        st.divider()
+
+        st.subheader("3. Descargar Word Auditado")
+        bio = io.BytesIO()
+        doc.save(bio)
+        bio.seek(0)
+
+        st.download_button(
+            label="Descargar Word con Control de Cambios y Resaltado Amarillo",
+            data=bio,
+            file_name="DICTAMEN_AUDITADO_CONTROL_CAMBIOS.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+
+    except Exception as doc_err:
+        st.error(f"Error procesando el documento Word: {doc_err}")
+
+else:
+    st.warning("Por favor, sube ambos archivos para iniciar la auditoria.")

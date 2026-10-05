@@ -3,7 +3,7 @@ import re
 import unicodedata
 import docx
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_COLOR_INDEX
-import pypdf
+import pdfplumber
 import streamlit as st
 
 
@@ -39,18 +39,19 @@ if archivo_pdf is not None and archivo_docx is not None:
       "Procesando y cotejando información... Por favor, espera."
   ):
 
-    # --- 1. EXTRACCIÓN DE DATOS EN PDF (SOLICITUD) ---
+    # --- 1. LECTURA MEJORADA CON PDFPLUMBER ---
     texto_pdf = ""
     try:
-      lector_pdf = pypdf.PdfReader(archivo_pdf)
-      for pag in lector_pdf.pages:
-        txt_pag = pag.extract_text()
-        if txt_pag:
-          texto_pdf += "\n" + txt_pag
+      with pdfplumber.open(archivo_pdf) as pdf:
+        for pagina in pdf.pages:
+          # Extrae texto estructurado manteniendo layout
+          t = pagina.extract_text(layout=True)
+          if t:
+            texto_pdf += "\n" + t
     except Exception as e:
-      st.error(f"Error al leer el PDF: {e}")
+      st.error(f"Error al leer el PDF con pdfplumber: {e}")
 
-    # Búsquedas Flexibles (Sensibles a múltiples patrones oficiales)
+    # --- BUSQUEDA CON EXPRESIONES REGULARES ---
     match_carpeta = re.search(
         r"(carpeta|expediente|causa|cui|ap|ci)\s*[\w\d\.\-/:]+",
         texto_pdf,
@@ -99,7 +100,7 @@ if archivo_pdf is not None and archivo_docx is not None:
     alertas_alineacion = []
     observaciones_cotejo = []
 
-    # A. Auditando el Encabezado de la Sección (Header)
+    # A. Auditando Encabezados
     try:
       for seccion in doc.sections:
         if seccion.header:
@@ -142,7 +143,7 @@ if archivo_pdf is not None and archivo_docx is not None:
     except Exception:
       pass
 
-    # B. Revisión Párrafo por Párrafo del Cuerpo
+    # B. Revisión de Párrafos
     for i, p in enumerate(doc.paragraphs, start=1):
       txt = p.text.strip()
       if not txt:
@@ -152,7 +153,7 @@ if archivo_pdf is not None and archivo_docx is not None:
       txt_limpio = quitar_acentos(txt_lower)
       texto_word_completo += " " + txt_lower
 
-      # REGLAS DE ALINEACIÓN
+      # Alineaciones
       es_asunto = "asunto:" in txt_limpio or "se emite dictamen" in txt_limpio
       es_leyenda_oficial = "margarita maza parada" in txt_limpio or "ano de" in txt_limpio
       es_fecha = bool(re.search(r'\b(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\b', txt_limpio)) and len(txt) < 60
@@ -203,14 +204,12 @@ if archivo_pdf is not None and archivo_docx is not None:
   col3.metric("Oficio", oficio_solicitud)
   col4.metric("Remitente", remitente_solicitud)
 
-  # Visor de Depuración de Texto del PDF
-  with st.expander("🔍 Ver texto extraído directamente del PDF de Solicitud"):
+  with st.expander("🔍 Ver texto extraído del PDF (Verificación)"):
     if texto_pdf.strip():
       st.text(texto_pdf)
     else:
       st.warning(
-          "El PDF no contiene texto legible (posiblemente es una imagen"
-          " escaneada)."
+          "El PDF es una imagen escaneada sin capa de texto. Se requiere OCR."
       )
 
   if observaciones_cotejo:

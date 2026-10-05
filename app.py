@@ -1,125 +1,308 @@
+import io
 import re
+import unicodedata
+import docx
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_COLOR_INDEX
+from docx.shared import Pt
+import pdfplumber
+from pdf2image import convert_from_bytes
+import pytesseract
 import streamlit as st
 
+
+def quitar_acentos(texto):
+  if not texto:
+    return ""
+  texto_norm = unicodedata.normalize("NFD", texto)
+  return "".join(c for c in texto_norm if unicodedata.category(c) != "Mn")
+
+
 st.set_page_config(
-    page_title="Revisión de Dictámenes y Prompts",
-    page_icon="⚖️",
-    layout="wide"
+    page_title="Auditor Pericial Integral", page_icon="⚖️", layout="centered"
 )
 
-st.title("⚖️ Sistema de Revisión de Dictámenes y Prompts")
-st.markdown("---")
+st.title("⚖️ Auditor Pericial de Formalidad y Cotejo")
+st.write(
+    "Sube el **PDF de Solicitud** y el **Word del Dictamen** para auditar"
+    " encabezados, ubicación de 'PRESENTE', alineación de imágenes, redacción y"
+    " formato."
+)
 
-# Lista de palabras esdrújulas frecuentes en el ámbito técnico-pericial
-PALABRAS_ESDRUJULAS = [
-    "criminalistica", "fisica", "quimica", "balistica", "dactiloscopia",
-    "informatica", "caracteristicas", "metodos", "tecnicas", "analisis",
-    "elementos", "morfologicos", "dictamenes", "juridico", "tecnico",
-    "cientifico", "periciales", "parrafo", "médico", "forense"
-]
+st.subheader("1. Carga de Documentos Oficiales")
+col_pdf, col_docx = st.columns(2)
 
-CORRECCIONES_ESDRUJULAS = {
-    "CRIMINALISTICA": "CRIMINALÍSTICA",
-    "criminalistica": "criminalística",
-    "FISICA": "FÍSICA",
-    "fisica": "física",
-    "QUIMICA": "QUÍMICA",
-    "quimica": "química",
-    "BALISTICA": "BALÍSTICA",
-    "balistica": "balística",
-    "DACTILOSCOPIA": "DACTILOSCOPÍA",
-    "dactiloscopia": "dactiloscopía",
-    "INFORMATICA": "INFORMÁTICA",
-    "informatica": "informática",
-    "CARACTERISTICAS": "CARACTERÍSTICAS",
-    "caracteristicas": "características",
-    "METODOS": "MÉTODOS",
-    "metodos": "métodos",
-    "TECNICAS": "TÉCNICAS",
-    "tecnicas": "técnicas",
-    "ANALISIS": "ANÁLISIS",
-    "analisis": "análisis",
-    "DICTAMENES": "DICTÁMENES",
-    "dictamenes": "dictámenes",
-    "JURIDICO": "JURÍDICO",
-    "juridico": "jurídico",
-    "TECNICO": "TÉCNICO",
-    "tecnico": "técnico",
-    "CIENTIFICO": "CIENTÍFICO",
-    "cientifico": "científico",
-    "PARRAFO": "PÁRRAFO",
-    "parrafo": "párrafo",
-}
+with col_pdf:
+  archivo_pdf = st.file_uploader("Subir Oficio de Solicitud (PDF)", type=["pdf"])
+with col_docx:
+  archivo_docx = st.file_uploader(
+      "Subir Dictamen Pericial en Word (.docx)", type=["docx"]
+  )
 
-def procesar_texto(texto: str):
-    log_cambios = []
-    texto_corregido = texto
+if archivo_pdf is not None and archivo_docx is not None:
+  with st.spinner(
+      "Procesando y realizando OCR en documentos... Por favor, espera."
+  ):
 
-    # 1. Corrección de espaciado tras signos de puntuación (comas, puntos, dos puntos)
-    # Patrón: un signo de puntuación seguido inmediatamente de una letra o número sin espacio
-    patron_espacios = r'([.,;:])([a-zA-ZáéíóúÁÉÍÓÚñÑ0-9])'
-    
-    def repl_espacio(match):
-        signo = match.group(1)
-        siguiente = match.group(2)
-        log_cambios.append(f"Espacio añadido tras signo de puntuación: `{signo}{siguiente}` ➔ `{signo} {siguiente}`")
-        return f"{signo} {siguiente}"
+    # --- 1. LECTURA DIGITAL + MOTOR OCR ---
+    bytes_pdf = archivo_pdf.read()
+    texto_pdf = ""
 
-    texto_corregido = re.sub(patron_espacios, repl_espacio, texto_corregido)
+    try:
+      with pdfplumber.open(io.BytesIO(bytes_pdf)) as pdf:
+        for pagina in pdf.pages:
+          t = pagina.extract_text(layout=True)
+          if t:
+            texto_pdf += "\n" + t
+    except Exception:
+      pass
 
-    # 2. Corrección de acentuación gráfica en esdrújulas técnicas
-    for sin_tilde, con_tilde in CORRECCIONES_ESDRUJULAS.items():
-        patron_palabra = r'\b' + re.escape(sin_tilde) + r'\b'
-        if re.search(patron_palabra, texto_corregido):
-            log_cambios.append(f"Acentuación de esdrújula: `{sin_tilde}` ➔ `{con_tilde}`")
-            texto_corregido = re.sub(patron_palabra, con_tilde, texto_corregido)
+    if not texto_pdf.strip():
+      try:
+        imagenes = convert_from_bytes(bytes_pdf)
+        for img in imagenes:
+          texto_pdf += "\n" + pytesseract.image_to_string(img, lang="spa")
+      except Exception as e:
+        st.error(f"Error al ejecutar OCR en el PDF: {e}")
 
-    # 3. Limpieza sintáctica para Prompts (Asteriscos parásitos dentro de comillas)
-    patron_asteriscos_comillas = r'([“"\'«])\s*\*+([^*]+)\*+\s*([”"\'»])'
-    if re.search(patron_asteriscos_comillas, texto_corregido):
-        log_cambios.append("Limpieza sintáctica de prompt: Eliminación de asteriscos innecesarios dentro de comillas.")
-        texto_corregido = re.sub(patron_asteriscos_comillas, r'\1\2\3', texto_corregido)
-
-    # 4. Generación visual de Control de Cambios
-    # Marcado visual: ~~Eliminado~~ **Añadido**
-    marcado_diff = texto
-    # Aplicar reemplazos visuales de espacios
-    marcado_diff = re.sub(r'([.,;:])([a-zA-ZáéíóúÁÉÍÓÚñÑ0-9])', r'\1~~ ~~** **\2', marcado_diff)
-    
-    for sin_tilde, con_tilde in CORRECCIONES_ESDRUJULAS.items():
-        patron_palabra = r'\b' + re.escape(sin_tilde) + r'\b'
-        marcado_diff = re.sub(patron_palabra, f"~~{sin_tilde}~~ **{con_tilde}**", marcado_diff)
-
-    return texto_corregido, marcado_diff, log_cambios
-
-# Interface Principal
-col1, col2 = st.columns(2)
-
-with col1:
-    st.subheader("📄 Texto / Prompt Original")
-    input_text = st.text_area(
-        "Pega aquí el texto del dictamen o las instrucciones del prompt:",
-        height=350,
-        placeholder="Ejemplo: Quien suscribe, Lcda. Jennifer Alin Ramírez Pérez,persona perita..."
+    # Extracción de Datos en PDF
+    match_carpeta = re.search(
+        r"(carpeta|expediente|causa|cui|ap|ci)\s*[\w\d\.\-/:]+",
+        texto_pdf,
+        re.IGNORECASE,
+    )
+    if not match_carpeta:
+      match_carpeta = re.search(
+          r"[A-Z0-9]{2,8}/[A-Z0-9/\-_]{4,25}", texto_pdf
+      )
+    carpeta_solicitud = (
+        match_carpeta.group(0).upper().strip() if match_carpeta else "NO DETECTADO"
     )
 
-if st.button("🔍 Ejecutar Revisión y Control de Cambios", type="primary"):
-    if not input_text.strip():
-        st.warning("Por favor, ingresa un texto para revisar.")
+    match_folio = re.search(
+        r"(folio)\s*[\w\d\.\-:]+", texto_pdf, re.IGNORECASE
+    )
+    if not match_folio:
+      match_folio = re.search(r"\b\d{5,8}\b", texto_pdf)
+    folio_solicitud = (
+        match_folio.group(0).upper().strip() if match_folio else "NO DETECTADO"
+    )
+
+    match_oficio = re.search(
+        r"(oficio|fgr|aic|pfm|uinp|sub)\s*[\w\d\.\-/:]+",
+        texto_pdf,
+        re.IGNORECASE,
+    )
+    oficio_solicitud = (
+        match_oficio.group(0).upper().strip() if match_oficio else "NO DETECTADO"
+    )
+
+    match_remitente = re.search(
+        r"(lic\.|mtro\.|mtra\.|dr\.|dra\.|licenciado|licenciada|c\.)\s+([a-záéíóúñ\s]+)",
+        texto_pdf,
+        re.IGNORECASE,
+    )
+    remitente_solicitud = (
+        match_remitente.group(0).strip().upper()
+        if match_remitente
+        else "NO DETECTADO"
+    )
+
+    # --- 2. AUDITORÍA Y CORRECCIÓN EN WORD ---
+    doc = docx.Document(archivo_docx)
+    texto_word_completo = ""
+    alertas_alineacion = []
+    observaciones_cotejo = []
+
+    # A. Auditando Encabezado
+    try:
+      for seccion in doc.sections:
+        if seccion.header:
+          header_text = ""
+          paragraphs_header = seccion.header.paragraphs
+          for p in paragraphs_header:
+            header_text += " " + p.text.strip().lower()
+
+          if carpeta_solicitud != "NO DETECTADO":
+            carpeta_clean = re.sub(r"[^\w]", "", carpeta_solicitud.lower())
+            header_clean = re.sub(r"[^\w]", "", header_text)
+            if carpeta_clean not in header_clean:
+              if paragraphs_header:
+                p_target = paragraphs_header[0]
+                p_target.add_run(
+                    f" [⚠️ ERROR EN ENCABEZADO: Falta o difiere Carpeta"
+                    f" ({carpeta_solicitud})]"
+                )
+                for r in p_target.runs:
+                  r.font.highlight_color = WD_COLOR_INDEX.YELLOW
+              observaciones_cotejo.append(
+                  f"Carpeta de investigación difiere o no consta ({carpeta_solicitud})."
+              )
+
+          if folio_solicitud != "NO DETECTADO":
+            folio_clean = re.sub(r"[^\w]", "", folio_solicitud.lower())
+            header_clean = re.sub(r"[^\w]", "", header_text)
+            if folio_clean not in header_clean:
+              if paragraphs_header:
+                p_target = paragraphs_header[-1]
+                p_target.add_run(
+                    f" [⚠️ ERROR EN ENCABEZADO: Falta o difiere Número de Folio"
+                    f" ({folio_solicitud})]"
+                )
+                for r in p_target.runs:
+                  r.font.highlight_color = WD_COLOR_INDEX.YELLOW
+              observaciones_cotejo.append(
+                  f"Número de folio difiere o no consta ({folio_solicitud})."
+              )
+    except Exception:
+      pass
+
+    # B. Limpieza de Espacios antes de "PRESENTE"
+    parrafos = doc.paragraphs
+    i = 0
+    while i < len(parrafos):
+      txt_p = parrafos[i].text.strip()
+      txt_limpio_p = quitar_acentos(txt_p.lower()).replace(" ", "")
+
+      if txt_limpio_p == "presente":
+        j = i - 1
+        while j >= 0 and not parrafos[j].text.strip():
+          p_element = parrafos[j]._element
+          p_element.getparent().remove(p_element)
+          alertas_alineacion.append(
+              "Se eliminaron espacios vacíos previos a la palabra 'PRESENTE'."
+          )
+          j -= 1
+      i += 1
+
+    # C. Revisión Párrafo por Párrafo del Cuerpo
+    for idx, p in enumerate(doc.paragraphs, start=1):
+      txt = p.text.strip()
+      
+      # Detección de imágenes/fotografías dentro del párrafo
+      tiene_imagen = len(p._element.xpath('.//w:drawing | .//w:pict')) > 0
+
+      txt_lower = txt.lower()
+      txt_limpio = quitar_acentos(txt_lower)
+      texto_word_completo += " " + txt_lower
+
+      # REGLA 1: "PRESENTE" (Alineado a la Izquierda con Interlineado 1.0)
+      es_presente = txt_limpio.replace(" ", "") == "presente"
+
+      if es_presente:
+        p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        p.paragraph_format.line_spacing = 1.0
+        p.paragraph_format.space_after = Pt(0)
+        alertas_alineacion.append(
+            f"Párrafo {idx}: 'PRESENTE' se alineó a la izquierda con espaciado de 1.00 sin saltos posteriores."
+        )
+        continue
+
+      if not txt and not tiene_imagen:
+        continue
+
+      # REGLA 2: FOTOGRAFÍAS E IMÁGENES Y NOMBRES/PIES DE FOTO
+      es_nombre_fotografia = any(
+          txt_limpio.startswith(prefix)
+          for prefix in ["fotografia", "foto", "figura", "imagen", "grafica", "iluminacion"]
+      )
+
+      if tiene_imagen or es_nombre_fotografia:
+        if p.alignment != WD_ALIGN_PARAGRAPH.CENTER:
+          p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+          for r in p.runs:
+            r.font.highlight_color = WD_COLOR_INDEX.YELLOW
+          alertas_alineacion.append(
+              f"Párrafo {idx}: Imagen/Fotografía o pie de foto '{txt[:35]}...' alineado al CENTRO."
+          )
+        continue
+
+      # REGLA 3: ELEMENTOS A LA DERECHA
+      es_asunto = "asunto:" in txt_limpio or "se emite dictamen" in txt_limpio
+      es_leyenda_oficial = "margarita maza parada" in txt_limpio or "ano de" in txt_limpio
+      es_fecha = bool(re.search(r'\b(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\b', txt_limpio)) and len(txt) < 60
+
+      es_derecha = es_asunto or es_leyenda_oficial or es_fecha
+
+      # REGLA 4: ELEMENTOS AL CENTRO
+      es_palabra_dictamen = "dictamen" in txt_limpio.replace(" ", "") and len(txt) < 30
+      es_atentamente = "atentamente" in txt_limpio and len(txt) < 30
+      es_perito = "perito en criminalistica" in txt_limpio
+
+      es_centrado = es_palabra_dictamen or es_atentamente or es_perito
+
+      # APLICACIÓN DE ALINEACIONES
+      if es_derecha:
+        if p.alignment != WD_ALIGN_PARAGRAPH.RIGHT:
+          p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+          for r in p.runs:
+            r.font.highlight_color = WD_COLOR_INDEX.YELLOW
+          alertas_alineacion.append(
+              f"Párrafo {idx}: '{txt[:35]}...' alineado A LA DERECHA."
+          )
+
+      elif es_centrado:
+        if p.alignment != WD_ALIGN_PARAGRAPH.CENTER:
+          p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+          for r in p.runs:
+            r.font.highlight_color = WD_COLOR_INDEX.YELLOW
+          alertas_alineacion.append(
+              f"Párrafo {idx}: '{txt[:35]}...' alineado AL CENTRO."
+          )
+
+      else:
+        if len(txt) > 40 and p.alignment != WD_ALIGN_PARAGRAPH.JUSTIFY:
+          p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+          for r in p.runs:
+            r.font.highlight_color = WD_COLOR_INDEX.YELLOW
+          alertas_alineacion.append(
+              f"Párrafo {idx}: Alineación ajustada a JUSTIFICADO."
+          )
+
+  # --- MOSTRAR RESULTADOS ---
+  st.success("🎉 ¡Auditoría completada!")
+  st.divider()
+
+  st.subheader("🕵️‍♂️ 1. Datos Extraídos del PDF (Digital/OCR)")
+  col1, col2, col3, col4 = st.columns(4)
+  col1.metric("Carpeta Inv.", carpeta_solicitud)
+  col2.metric("Folio", folio_solicitud)
+  col3.metric("Oficio", oficio_solicitud)
+  col4.metric("Remitente", remitente_solicitud)
+
+  with st.expander("🔍 Ver texto extraído por OCR del PDF (Verificación)"):
+    if texto_pdf.strip():
+      st.text(texto_pdf)
     else:
-        texto_limpio, texto_diff, cambios = procesar_texto(input_text)
+      st.warning("No se pudo extraer texto ni con OCR. Verifica la imagen.")
 
-        with col2:
-            st.subheader("📌 Control de Cambios")
-            st.markdown(texto_diff)
+  if observaciones_cotejo:
+    st.subheader("⚠️ Observaciones de Encabezado y Cotejo")
+    for obs in set(observaciones_cotejo):
+      st.error(f"❌ {obs}")
 
-        st.markdown("---")
-        st.subheader("📋 Registro de Observaciones y Correcciones")
-        if cambios:
-            for cambio in cambios:
-                st.write(f"• {cambio}")
-        else:
-            st.success("No se detectaron errores de espaciado, ortografía o sintaxis en el texto proporcionado.")
+  st.divider()
 
-        st.subheader("✅ Texto Final Corregido")
-        st.code(texto_limpio, language="markdown")
+  st.subheader("📐 2. Reporte de Formato y Alineaciones")
+  if alertas_alineacion:
+    for al in list(set(alertas_alineacion))[:10]:
+      st.write(f"* {al}")
+  else:
+    st.success("Alineaciones y centrado de imágenes/pies de foto correctos.")
+
+  st.divider()
+
+  st.subheader("📥 3. Descargar Word Auditado")
+  bio = io.BytesIO()
+  doc.save(bio)
+  bio.seek(0)
+
+  st.download_button(
+      label="📥 Descargar Word con Correcciones y Marcas",
+      data=bio,
+      file_name="DICTAMEN_AUDITADO.docx",
+      mime=(
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      ),
+  )
+else:
+  st.warning("💡 Por favor, sube ambos archivos para iniciar la auditoría.")

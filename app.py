@@ -178,14 +178,14 @@ if archivo_pdf is not None and archivo_docx is not None:
     for idx, p in enumerate(doc.paragraphs, start=1):
       txt = p.text.strip()
       
-      # Detección de imágenes/fotografías dentro del párrafo (Inline Shapes)
+      # Detección de imágenes/fotografías dentro del párrafo
       tiene_imagen = len(p._element.xpath('.//w:drawing | .//w:pict')) > 0
 
       txt_lower = txt.lower()
       txt_limpio = quitar_acentos(txt_lower)
       texto_word_completo += " " + txt_lower
 
-      # REGLA 1: "PRESENTE" (Alineado a la Izquierda con Espaciado Sencillo 1.0)
+      # REGLA 1: "PRESENTE" (Alineado a la Izquierda con Interlineado 1.0)
       es_presente = txt_limpio.replace(" ", "") == "presente"
 
       if es_presente:
@@ -284,4 +284,25 @@ if archivo_pdf is not None and archivo_docx is not None:
 
   st.subheader("📐 2. Reporte de Formato y Alineaciones")
   if alertas_alineacion:
-    for al in list(set(alertas_alineacion))
+    for al in list(set(alertas_alineacion))[:10]:
+      st.write(f"* {al}")
+  else:
+    st.success("Alineaciones y centrado de imágenes/pies de foto correctos.")
+
+  st.divider()
+
+  st.subheader("📥 3. Descargar Word Auditado")
+  bio = io.BytesIO()
+  doc.save(bio)
+  bio.seek(0)
+
+  st.download_button(
+      label="📥 Descargar Word con Correcciones y Marcas",
+      data=bio,
+      file_name="DICTAMEN_AUDITADO.docx",
+      mime=(
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      ),
+  )
+else:
+  st.warning("💡 Por favor, sube ambos archivos para iniciar la auditoría.")

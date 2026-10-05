@@ -29,10 +29,7 @@ def activar_control_de_cambios(doc):
 
 
 def corregir_y_resaltar_ortografia(p, idx, alertas_ortografia):
-  """Detecta errores de sintaxis u ortografía técnica, resalta la palabra original
-
-  en amarillo y sugiere la corrección.
-  """
+  """Detecta errores de sintaxis u ortografía técnica, resalta la palabra original en amarillo."""
   correcciones = {
       r"\bcaracteristicas\b": "características",
       r"\bfisica\b": "física",
@@ -57,19 +54,16 @@ def corregir_y_resaltar_ortografia(p, idx, alertas_ortografia):
   for patron, reemplazo in correcciones.items():
     if re.search(patron, texto_original, re.IGNORECASE):
       hubo_cambio = True
-      # Resaltar párrafos con errores de sintaxis/ortografía técnica
       for run in p.runs:
         if re.search(patron, run.text, re.IGNORECASE):
           run.font.highlight_color = WD_COLOR_INDEX.YELLOW
 
-      # Sustitución respetando mayúsculas y minúsculas
       texto_original = re.sub(
           patron, reemplazo, texto_original, flags=re.IGNORECASE
       )
 
   if hubo_cambio:
     p.text = texto_original
-    # Reaplicar el resaltado amarillo al texto corregido para visibilidad
     for run in p.runs:
       for _, reemplazo in correcciones.items():
         if reemplazo.lower() in run.text.lower():
@@ -218,3 +212,57 @@ if archivo_pdf is not None and archivo_docx is not None:
                     f" ({folio_solicitud})]"
                 )
                 for r in p_target.runs:
+                  r.font.highlight_color = WD_COLOR_INDEX.YELLOW
+              observaciones_cotejo.append(
+                  f"Número de folio difiere o no consta ({folio_solicitud})."
+              )
+    except Exception:
+      pass
+
+    # B. Limpieza de Espacios antes de "PRESENTE"
+    parrafos = doc.paragraphs
+    i = 0
+    while i < len(parrafos):
+      txt_p = parrafos[i].text.strip()
+      txt_limpio_p = quitar_acentos(txt_p.lower()).replace(" ", "")
+
+      if txt_limpio_p == "presente":
+        j = i - 1
+        while j >= 0 and not parrafos[j].text.strip():
+          p_element = parrafos[j]._element
+          p_element.getparent().remove(p_element)
+          alertas_alineacion.append(
+              "Se eliminaron espacios vacíos previos a la palabra 'PRESENTE'."
+          )
+          j -= 1
+      i += 1
+
+    # C. Revisión Párrafo por Párrafo del Cuerpo
+    for idx, p in enumerate(doc.paragraphs, start=1):
+      txt = p.text.strip()
+
+      # Detección de imágenes/fotografías
+      tiene_imagen = len(p._element.xpath('.//w:drawing | .//w:pict')) > 0
+
+      txt_lower = txt.lower()
+      txt_limpio = quitar_acentos(txt_lower)
+      texto_word_completo += " " + txt_lower
+
+      # Detección, subrayado amarillo y corrección gramatical/ortográfica
+      if txt:
+        corregir_y_resaltar_ortografia(p, idx, alertas_ortografia)
+
+      # REGLA 1: "PRESENTE"
+      es_presente = txt_limpio.replace(" ", "") == "presente"
+      if es_presente:
+        p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        p.paragraph_format.line_spacing = 1.0
+        p.paragraph_format.space_after = Pt(0)
+        continue
+
+      if not txt and not tiene_imagen:
+        continue
+
+      # REGLA 2: FOTOGRAFÍAS / PIES DE FOTO
+      es_nombre_fotografia = any(
+          txt_limpio.

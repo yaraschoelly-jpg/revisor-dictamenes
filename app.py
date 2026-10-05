@@ -7,13 +7,14 @@ import pypdf
 import streamlit as st
 
 
-# Función auxiliar para quitar acentos de forma segura
+# Función para quitar acentos
 def quitar_acentos(texto):
-  texto_normalizado = unicodedata.normalize("NFD", texto)
-  return "".join(c for c in texto_normalizado if unicodedata.category(c) != "Mn")
+  if not texto:
+    return ""
+  texto_norm = unicodedata.normalize("NFD", texto)
+  return "".join(c for c in texto_norm if unicodedata.category(c) != "Mn")
 
 
-# Configuración de la interfaz web
 st.set_page_config(
     page_title="Auditor Pericial Integral", page_icon="⚖️", layout="centered"
 )
@@ -47,66 +48,181 @@ with col_docx:
   )
 
 if archivo_pdf is not None and archivo_docx is not None:
-  st.info(
+  with st.spinner(
       "🔍 Analizando consistencia, formalidad y ortografía... Por favor,"
       " espera."
+  ):
+
+    # --- 1. LECTURA RÁPIDA DEL PDF ---
+    texto_pdf = ""
+    try:
+      lector_pdf = pypdf.PdfReader(archivo_pdf)
+      for pag in lector_pdf.pages:
+        txt_pag = pag.extract_text()
+        if txt_pag:
+          texto_pdf += " " + txt_pag
+    except Exception as e:
+      st.error(f"Error al leer el PDF: {e}")
+
+    # Extraer Carpeta y Oficio con expresiones regulares flexibles
+    match_carpeta = re.search(
+        r"(FED|CUI|EXP|CP|CI|CAUSA)[/\-\w\d]+", texto_pdf, re.IGNORECASE
+    )
+    carpeta_solicitud = (
+        match_carpeta.group(0).upper() if match_carpeta else "NO DETECTADO"
+    )
+
+    match_oficio = re.search(
+        r"(FGR|AIC|PFM|UINP|SUB)[/\-\w\d]+", texto_pdf, re.IGNORECASE
+    )
+    oficio_solicitud = (
+        match_oficio.group(0).upper() if match_oficio else "NO DETECTADO"
+    )
+
+    # --- 2. LECTURA Y AUDITORÍA DEL WORD ---
+    doc = docx.Document(archivo_docx)
+    texto_word_completo = ""
+    palabras_sospechosas = []
+    alertas_diseno = []
+
+    # A. Revisión rápida de Encabezado
+    try:
+      for seccion in doc.sections:
+        if seccion.header:
+          for p in seccion.header.paragraphs:
+            p_text = p.text.strip()
+            if "carpeta" in p_text.lower():
+              if (
+                  carpeta_solicitud != "NO DETECTADO"
+                  and carpeta_solicitud.lower() not in p_text.lower()
+              ):
+                p.add_run(
+                    f" [⚠️ ERROR: EN SOLICITUD CONSTA {carpeta_solicitud}]"
+                )
+                for r in p.runs:
+                  r.font.highlight_color = WD_COLOR_INDEX.YELLOW
+    except Exception:
+      pass
+
+    # B. Revisión de Párrafos del Cuerpo
+    tiene_ecatepec = False
+    tiene_iztapalapa = False
+
+    for i, p in enumerate(doc.paragraphs, start=1):
+      txt = p.text.strip()
+      if not txt:
+        continue
+
+      txt_lower = txt.lower()
+      texto_word_completo += " " + txt_lower
+
+      if "ecatepec" in txt_lower:
+        tiene_ecatepec = True
+      if "iztapalapa" in txt_lower:
+        tiene_iztapalapa = True
+
+      # Revisión Ortográfica: Nombre propio "Rocío"
+      txt_sin_acentos = quitar_acentos(txt_lower)
+      if ("maritza" in txt_sin_acentos or "ramirez" in txt_sin_acentos) and (
+          "rocio" in txt_sin_acentos
+      ):
+        for r in p.runs:
+          if "rocio" in quitar_acentos(r.text.lower()):
+            r.font.highlight_color = WD_COLOR_INDEX.YELLOW
+        palabras_sospechosas.append(
+            f"Párrafo {i}: Verificar acentuación del nombre 'Rocío'."
+        )
+
+      # Revisión de Alineación
+      es_centrado = any(
+          kw in txt_lower
+          for kw in [
+              "d i c t a m e n",
+              "atentamente",
+              "nombre y firma",
+              "dictamen pericial",
+          ]
+      )
+      if es_centrado:
+        if p.alignment is not None and p.alignment != WD_ALIGN_PARAGRAPH.CENTER:
+          for r in p.runs:
+            r.font.highlight_color = WD_COLOR_INDEX.YELLOW
+          alertas_diseno.append(f"❌ Párrafo {i}: Debe ir CENTRADO.")
+      elif len(txt) > 80:
+        if (
+            p.alignment is not None
+            and p.alignment != WD_ALIGN_PARAGRAPH.JUSTIFY
+        ):
+          for r in p.runs:
+            r.font.highlight_color = WD_COLOR_INDEX.YELLOW
+          alertas_diseno.append(f"❌ Párrafo {i}: Debe ir JUSTIFICADO.")
+
+      # Contradicción Geográfica
+      if (
+          tiene_ecatepec
+          and tiene_iztapalapa
+          and "iztapalapa" in txt_lower
+          and "[⚠️" not in txt
+      ):
+        p.add_run(
+            " [⚠️ CONTRADICCIÓN DE PLANTILLA: Se detectó Ecatepec e Iztapalapa"
+            " en el texto.]"
+        )
+        for r in p.runs:
+          r.font.highlight_color = WD_COLOR_INDEX.YELLOW
+
+  # --- MOSTRAR RESULTADOS ---
+  st.success("✅ ¡Auditoría completada!")
+  st.divider()
+
+  st.subheader("📐 1. Reporte de Diseño y Formalidad")
+  if alertas_diseno:
+    for al in list(set(alertas_diseno))[:5]:
+      st.write(al)
+  else:
+    st.success("Estructura formal correcta.")
+
+  st.divider()
+
+  st.subheader("🕵️‍♂️ 2. Validación Cruzada (PDF vs. Word)")
+  col1, col2 = st.columns(2)
+  col1.info(f"📄 **Oficio PDF:** {oficio_solicitud}")
+  col2.info(f"📂 **Carpeta PDF:** {carpeta_solicitud}")
+
+  st.subheader("📝 3. Reporte Ortográfico")
+  if palabras_sospechosas:
+    for ps in set(palabras_sospechosas):
+      st.write(f"* {ps}")
+  else:
+    st.success("Sin faltas ortográficas detectadas en nombres de personal.")
+
+  # Rubros Faltantes
+  rubros_faltantes = []
+  txt_completo_clean = quitar_acentos(texto_word_completo)
+  for rubro in RUBROS_BASE:
+    if quitar_acentos(rubro) not in txt_completo_clean:
+      rubros_faltantes.append(rubro.upper())
+
+  if rubros_faltantes:
+    st.error(
+        f"❌ Faltan los siguientes rubros obligatorios: {', '.join(rubros_faltantes)}"
+    )
+
+  st.divider()
+
+  # Botón para descargar el Word modificado
+  st.subheader("📥 Descargar documento auditado")
+  bio = io.BytesIO()
+  doc.save(bio)
+  bio.seek(0)
+
+  st.download_button(
+      label="📥 Descargar Word con Marcas de Error",
+      data=bio,
+      file_name="DICTAMEN_AUDITADO.docx",
+      mime=(
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      ),
   )
-
-  # --- 1. EXTRACCIÓN DE TEXTO DEL PDF ---
-  texto_pdf = ""
-  try:
-    lector_pdf = pypdf.PdfReader(archivo_pdf)
-    for pagina in lector_pdf.pages:
-      t = pagina.extract_text()
-      if t:
-        texto_pdf += " " + t
-  except Exception as e:
-    st.error(f"Error al leer el archivo PDF: {e}")
-
-  # --- 2. EXTRAER DATOS CLAVE DEL PDF ---
-  match_carpeta_pdf = re.search(
-      r"(FED|CUI|EXP|CP|CI|CAUSAPENAL)[/\-\w]+", texto_pdf, re.IGNORECASE
-  )
-  carpeta_solicitud = (
-      match_carpeta_pdf.group(0).upper() if match_carpeta_pdf else "NO DETECTADO"
-  )
-
-  match_oficio_pdf = re.search(
-      r"(FGR|AIC|PFM|UINP)[/\-\w]+", texto_pdf, re.IGNORECASE
-  )
-  oficio_solicitud = (
-      match_oficio_pdf.group(0).upper() if match_oficio_pdf else "NO DETECTADO"
-  )
-
-  # --- 3. EXTRACCIÓN Y AUDITORÍA EN EL WORD ---
-  doc = docx.Document(archivo_docx)
-  texto_word_completo = ""
-
-  palabras_sospechosas = []
-  alertas_diseno = []
-
-  # A. Revisión de Encabezados (Header)
-  try:
-    for seccion in doc.sections:
-      header = seccion.header
-      if header:
-        for parrafo in header.paragraphs:
-          texto_linea = parrafo.text.strip()
-          if not texto_linea:
-            continue
-          texto_linea_lower = texto_linea.lower()
-
-          if "carpeta" in texto_linea_lower:
-            if (
-                carpeta_solicitud != "NO DETECTADO"
-                and carpeta_solicitud.lower() not in texto_linea_lower
-            ):
-              run_error = parrafo.add_run(
-                  f" [⚠️ ERROR DE CONTROL: EN SOLICITUD CONSTA"
-                  f" {carpeta_solicitud}]"
-              )
-              run_error.font.highlight_color = WD_COLOR_INDEX.YELLOW
-              for run in parrafo.runs:
-                run.font.highlight_color = WD_COLOR_INDEX.YELLOW
-  except Exception as e:
-    pass
+else:
+  st.warning("💡 Por favor, sube **ambos archivos** para iniciar la auditoría.")

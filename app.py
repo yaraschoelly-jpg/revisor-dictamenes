@@ -37,7 +37,7 @@ RUBROS_BASE = [
     "conclusion",
 ]
 
-st.subheader("📁 1. Carga de Documentos Oficiales")
+st.subheader("1. Carga de Documentos Oficiales")
 col_pdf, col_docx = st.columns(2)
 
 with col_pdf:
@@ -49,8 +49,7 @@ with col_docx:
 
 if archivo_pdf is not None and archivo_docx is not None:
   with st.spinner(
-      "🔍 Analizando consistencia, formalidad y ortografía... Por favor,"
-      " espera."
+      "Analizando consistencia, formalidad y ortografía... Por favor, espera."
   ):
 
     # --- 1. LECTURA Y EXTRACCIÓN DEL PDF ---
@@ -96,7 +95,7 @@ if archivo_pdf is not None and archivo_docx is not None:
                   and carpeta_solicitud.lower() not in p_text.lower()
               ):
                 p.add_run(
-                    f" [⚠️ ERROR: EN SOLICITUD CONSTA {carpeta_solicitud}]"
+                    f" [ERROR: EN SOLICITUD CONSTA {carpeta_solicitud}]"
                 )
                 for r in p.runs:
                   r.font.highlight_color = WD_COLOR_INDEX.YELLOW
@@ -134,47 +133,4 @@ if archivo_pdf is not None and archivo_docx is not None:
 
       # --- CENTRADO OBLIGATORIO DE 'DICTAMEN' Y RUBROS ---
       es_palabra_dictamen = bool(
-          re.search(r"\bd\s*i\s*c\s*t\s*a\s*m\s*e\s*n\b", txt_lower)
-      )
-      es_centrado = es_palabra_dictamen or any(
-          kw in txt_lower
-          for kw in ["atentamente", "nombre y firma", "dictamen pericial"]
-      )
-
-      if es_centrado:
-        if p.alignment != WD_ALIGN_PARAGRAPH.CENTER:
-          p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-          for r in p.runs:
-            r.font.highlight_color = WD_COLOR_INDEX.YELLOW
-          alertas_diseno.append(
-              f"❌ Párrafo {i}: La palabra *'{txt[:30]}'* debe ir CENTRADA (se"
-              " corrigió en el archivo)."
-          )
-      elif len(txt) > 80:
-        if (
-            p.alignment is not None
-            and p.alignment != WD_ALIGN_PARAGRAPH.JUSTIFY
-        ):
-          for r in p.runs:
-            r.font.highlight_color = WD_COLOR_INDEX.YELLOW
-          alertas_diseno.append(f"❌ Párrafo {i}: Debe ir JUSTIFICADO.")
-
-      # Contradicción Geográfica
-      if (
-          tiene_ecatepec
-          and tiene_iztapalapa
-          and "iztapalapa" in txt_lower
-          and "[⚠️" not in txt
-      ):
-        p.add_run(
-            " [⚠️ CONTRADICCIÓN DE PLANTILLA: Se detectó Ecatepec e Iztapalapa"
-            " en el texto.]"
-        )
-        for r in p.runs:
-          r.font.highlight_color = WD_COLOR_INDEX.YELLOW
-
-  # --- MOSTRAR RESULTADOS ---
-  st.success("✅ ¡Auditoría completada!")
-  st.divider()
-
-  st.subheader("📐 1.
+          re.search(r"\bd\s*i\s*c\s

@@ -4,6 +4,8 @@ import unicodedata
 import docx
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_COLOR_INDEX
 import pdfplumber
+from pdf2image import convert_from_bytes
+import pytesseract
 import streamlit as st
 
 
@@ -36,22 +38,33 @@ with col_docx:
 
 if archivo_pdf is not None and archivo_docx is not None:
   with st.spinner(
-      "Procesando y cotejando información... Por favor, espera."
+      "Procesando y realizando OCR en documentos... Por favor, espera."
   ):
 
-    # --- 1. LECTURA MEJORADA CON PDFPLUMBER ---
+    # --- 1. LECTURA DIGITAL + MOTOR OCR ---
+    bytes_pdf = archivo_pdf.read()
     texto_pdf = ""
+
+    # Intento 1: Extracción Digital Rápida
     try:
-      with pdfplumber.open(archivo_pdf) as pdf:
+      with pdfplumber.open(io.BytesIO(bytes_pdf)) as pdf:
         for pagina in pdf.pages:
-          # Extrae texto estructurado manteniendo layout
           t = pagina.extract_text(layout=True)
           if t:
             texto_pdf += "\n" + t
-    except Exception as e:
-      st.error(f"Error al leer el PDF con pdfplumber: {e}")
+    except Exception:
+      pass
 
-    # --- BUSQUEDA CON EXPRESIONES REGULARES ---
+    # Intento 2: OCR Si es PDF Escaneado / Imagen
+    if not texto_pdf.strip():
+      try:
+        imagenes = convert_from_bytes(bytes_pdf)
+        for img in imagenes:
+          texto_pdf += "\n" + pytesseract.image_to_string(img, lang="spa")
+      except Exception as e:
+        st.error(f"Error al ejecutar OCR en el PDF: {e}")
+
+    # --- BÚSQUEDA DE DATOS CLAVE (REGEX) ---
     match_carpeta = re.search(
         r"(carpeta|expediente|causa|cui|ap|ci)\s*[\w\d\.\-/:]+",
         texto_pdf,
@@ -100,7 +113,7 @@ if archivo_pdf is not None and archivo_docx is not None:
     alertas_alineacion = []
     observaciones_cotejo = []
 
-    # A. Auditando Encabezados
+    # A. Auditando Encabezado de Sección
     try:
       for seccion in doc.sections:
         if seccion.header:
@@ -143,7 +156,7 @@ if archivo_pdf is not None and archivo_docx is not None:
     except Exception:
       pass
 
-    # B. Revisión de Párrafos
+    # B. Revisión de Párrafos del Cuerpo
     for i, p in enumerate(doc.paragraphs, start=1):
       txt = p.text.strip()
       if not txt:
@@ -153,7 +166,7 @@ if archivo_pdf is not None and archivo_docx is not None:
       txt_limpio = quitar_acentos(txt_lower)
       texto_word_completo += " " + txt_lower
 
-      # Alineaciones
+      # REGLAS DE ALINEACIÓN
       es_asunto = "asunto:" in txt_limpio or "se emite dictamen" in txt_limpio
       es_leyenda_oficial = "margarita maza parada" in txt_limpio or "ano de" in txt_limpio
       es_fecha = bool(re.search(r'\b(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\b', txt_limpio)) and len(txt) < 60
@@ -197,20 +210,18 @@ if archivo_pdf is not None and archivo_docx is not None:
   st.success("🎉 ¡Auditoría completada!")
   st.divider()
 
-  st.subheader("🕵️‍♂️ 1. Datos Extraídos del PDF de Solicitud")
+  st.subheader("🕵️‍♂️ 1. Datos Extraídos del PDF (Digital/OCR)")
   col1, col2, col3, col4 = st.columns(4)
   col1.metric("Carpeta Inv.", carpeta_solicitud)
   col2.metric("Folio", folio_solicitud)
   col3.metric("Oficio", oficio_solicitud)
   col4.metric("Remitente", remitente_solicitud)
 
-  with st.expander("🔍 Ver texto extraído del PDF (Verificación)"):
+  with st.expander("🔍 Ver texto extraído por OCR del PDF (Verificación)"):
     if texto_pdf.strip():
       st.text(texto_pdf)
     else:
-      st.warning(
-          "El PDF es una imagen escaneada sin capa de texto. Se requiere OCR."
-      )
+      st.warning("No se pudo extraer texto ni con OCR. Verifica la imagen.")
 
   if observaciones_cotejo:
     st.subheader("⚠️ Observaciones de Encabezado y Cotejo")

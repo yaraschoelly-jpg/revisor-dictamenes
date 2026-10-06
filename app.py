@@ -54,24 +54,24 @@ def corregir_y_resaltar_ortografia(p, idx, alertas_ortografia):
         r"\btecnico\b": "técnico",
     }
 
-    texto_original = p.text
     hubo_cambio = False
 
-    for patron, reemplazo in correcciones.items():
-        if re.search(patron, texto_original, re.IGNORECASE):
-            hubo_cambio = True
-            for run in p.runs:
-                if re.search(patron, run.text, re.IGNORECASE):
-                    run.font.highlight_color = WD_COLOR_INDEX.YELLOW
-            texto_original = re.sub(patron, reemplazo, texto_original, flags=re.IGNORECASE)
+    # Corrección iterando por cada fragmento (run) para preservar negritas e itálicas
+    for run in p.runs:
+        texto_run_original = run.text
+        if not texto_run_original.strip():
+            continue
+
+        for patron, reemplazo in correcciones.items():
+            if re.search(patron, texto_run_original, re.IGNORECASE):
+                hubo_cambio = True
+                nuevo_texto_run = re.sub(patron, reemplazo, texto_run_original, flags=re.IGNORECASE)
+                run.text = nuevo_texto_run
+                run.font.highlight_color = WD_COLOR_INDEX.YELLOW
+                texto_run_original = nuevo_texto_run
 
     if hubo_cambio:
-        p.text = texto_original
-        for run in p.runs:
-            for _, reemplazo in correcciones.items():
-                if reemplazo.lower() in run.text.lower():
-                    run.font.highlight_color = WD_COLOR_INDEX.YELLOW
-        alertas_ortografia.append(f"Parrafo {idx}: Se subrayaron y corrigieron faltas de acentuacion tecnica.")
+        alertas_ortografia.append(f"Parrafo {idx}: Se subrayaron y corrigieron faltas de acentuacion tecnica (conservando negritas).")
 
 
 st.set_page_config(page_title="Auditor Pericial Integral", page_icon="⚖️", layout="centered")
@@ -133,7 +133,6 @@ if archivo_pdf is not None and archivo_docx is not None:
 
         alertas_alineacion = []
         alertas_ortografia = []
-        observaciones_cotejo = []
 
         parrafos = doc.paragraphs
         i = 0

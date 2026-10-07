@@ -204,4 +204,70 @@ if archivo_pdf is not None and archivo_docx is not None and archivo_sop is not N
 
             es_palabra_dictamen = "dictamen" in txt_limpio.replace(" ", "") and len(txt) < 30
             es_atentamente = "atentamente" in txt_limpio and len(txt) < 30
-            es_perito = "perito en criminalistica" in
+            es_perito = "perito en criminalistica" in txt_limpio
+            es_centrado = es_palabra_dictamen or es_atentamente or es_perito
+
+            if es_derecha:
+                p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            elif es_centrado:
+                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            else:
+                if len(txt) > 40:
+                    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+
+        st.success("Auditoria completada exitosamente")
+        st.divider()
+
+        st.subheader("1. Datos Extraidos del PDF de Solicitud")
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Carpeta Inv.", carpeta_solicitud)
+        col2.metric("Folio", folio_solicitud)
+        col3.metric("Oficio", oficio_solicitud)
+        col4.metric("Remitente", remitente_solicitud)
+
+        st.divider()
+
+        st.subheader("2. Revision del Documento doc sop (PDF)")
+        col_sop1, col_sop2 = st.columns(2)
+        
+        with col_sop1:
+            st.write("**Titulos requeridos:**")
+            for t_req, estuvo in titulos_sop_encontrados.items():
+                estado_str = "✅ Detectado" if estuvo else "❌ Faltante"
+                st.write(f"- **{t_req.title()}:** {estado_str}")
+
+        with col_sop2:
+            faltantes = [t.title() for t, estuvo in titulos_sop_encontrados.items() if not estuvo]
+            if faltantes:
+                st.error(f"Faltan los siguientes titulos en el doc sop: {', '.join(faltantes)}")
+            else:
+                st.success("El doc sop contiene todos los titulos obligatorios.")
+
+        st.divider()
+
+        st.subheader("3. Errores Gramaticales y Ortograficos Detectados")
+        if alertas_ortografia:
+            for ao in list(set(alertas_ortografia))[:10]:
+                st.warning(ao)
+        else:
+            st.success("No se detectaron faltas de acentuacion tecnica en palabras clave.")
+
+        st.divider()
+
+        st.subheader("4. Descargar Word Auditado")
+        bio = io.BytesIO()
+        doc.save(bio)
+        bio.seek(0)
+
+        st.download_button(
+            label="Descargar Word con Control de Cambios y Resaltado Amarillo",
+            data=bio,
+            file_name="DICTAMEN_AUDITADO_CONTROL_CAMBIOS.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+
+    except Exception as doc_err:
+        st.error(f"Error procesando el documento Word: {doc_err}")
+
+else:
+    st.warning("Por favor, sube los tres archivos (PDF Solicitud, Word Dictamen y PDF doc sop) para iniciar la auditoria.")

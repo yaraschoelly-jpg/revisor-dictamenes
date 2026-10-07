@@ -84,7 +84,7 @@ def audit_y_resaltar_parrafo(p, idx, alertas_ortografia):
                 alertas_ortografia.append(f"Párrafo {idx}: Se formateó el subtítulo '{subtitulo_correcto}' (Primera mayúscula, resto minúsculas, NEGRITAS).")
                 return
 
-    # 3. Corrección Ortográfica Técnica con Resaltado Amarillo y Registro en Control de Cambios
+    # 3. Corrección Ortográfica Técnica
     diccionario_errores = {
         r"\bcaracteristicas\b": "características",
         r"\bfisica\b": "física",
@@ -191,167 +191,24 @@ if archivo_pdf is not None and archivo_docx is not None and archivo_sop is not N
     match_remitente = re.search(r"(lic\.|mtro\.|mtra\.|dr\.|dra\.|licenciado|licenciada|c\.)\s+([a-záéíóúñ\s]+)", texto_pdf, re.IGNORECASE)
     remitente_solicitud = match_remitente.group(0).strip().upper() if match_remitente else "NO DETECTADO"
 
-    # --- 2. LECTURA Y VALIDACIÓN DEL PDF "DOC SOP" ---
+    # --- 2. LECTURA Y VALIDACIÓN DEL PDF "DOC SOP" CON NOMBRES EXACTOS ---
     texto_sop = extraer_texto_pdf(archivo_sop)
     texto_sop_clean = quitar_acentos(texto_sop.lower())
 
-    titulos_sop_requeridos = [
-        "comunicacion con la autoridad",
-        "documentacion escrita",
-        "hoja de datos crudos",
-        "identificacion de riesgos",
-        "material",
-        "procesamiento de indicios",
-        "lineas base",
-        "croquis"
+    formatos_sop_requeridos = [
+        ("VERIFICACIÓN MATERIAL/ INSUMOS/ EQUIPO PARA INSPECCIONES", r"verificacion\s+material"),
+        ("IDENTIFICACIÓN, EVALUACIÓN Y MANEJO DE RIESGOS", r"manejo\s+de\s+riesgos|identificacion.*riesgos"),
+        ("DOCUMENTACIÓN ESCRITA", r"documentacion\s+escrita"),
+        ("HOJA DE DATOS CRUDOS", r"hoja\s+de\s+datos\s+crudos|datos\s+crudos"),
+        ("comunicacion con la autoridad", r"comunicacion\s+con\s+la\s+autoridad"),
+        ("croquis simple", r"croquis\s+simple|croquis"),
+        ("procesamiento de indicios", r"procesamiento\s+de\s+indicios"),
+        ("matriz de datos lineas base", r"matriz\s+de\s+datos\s+lineas\s+base|lineas\s+base")
     ]
 
     titulos_sop_encontrados = {}
-    for tit in titulos_sop_requeridos:
-        titulos_sop_encontrados[tit] = tit in texto_sop_clean
+    for nombre_oficial, patron in formatos_sop_requeridos:
+        titulos_sop_encontrados[nombre_oficial] = bool(re.search(patron, texto_sop_clean))
 
     # --- 3. AUDITORÍA EN WORD CON CONTROL DE CAMBIOS ACTIVO ---
     try:
-        archivo_docx.seek(0)
-        doc = docx.Document(archivo_docx)
-        activar_control_de_cambios(doc)
-
-        alertas_alineacion = []
-        alertas_ortografia = []
-
-        parrafos = doc.paragraphs
-
-        # Limpieza previa de espacios antes de "PRESENTE"
-        i = 0
-        while i < len(parrafos):
-            txt_p = parrafos[i].text.strip()
-            txt_limpio_p = quitar_acentos(txt_p.lower()).replace(" ", "")
-            if txt_limpio_p == "presente":
-                j = i - 1
-                while j >= 0 and not parrafos[j].text.strip():
-                    p_element = parrafos[j]._element
-                    p_element.getparent().remove(p_element)
-                    alertas_alineacion.append("Se eliminaron espacios vacíos previos a la palabra PRESENTE.")
-                    j -= 1
-            i += 1
-
-        en_bloque_destinatario = False
-
-        for idx, p in enumerate(doc.paragraphs, start=1):
-            # APLICACIÓN DE INTERLINEADO SENCILLO GLOBAL (1.00)
-            p.paragraph_format.line_spacing = 1.0
-            p.paragraph_format.space_before = Pt(0)
-            p.paragraph_format.space_after = Pt(0)
-
-            txt = p.text.strip()
-            tiene_imagen = len(p._element.xpath('.//w:drawing | .//w:pict')) > 0
-            txt_lower = txt.lower()
-            txt_limpio = quitar_acentos(txt_lower)
-
-            if txt:
-                audit_y_resaltar_parrafo(p, idx, alertas_ortografia)
-
-            # A. IMÁGENES Y TÍTULOS DE FOTOGRAFÍAS AL CENTRO
-            prefijos_fotos = [
-                "fotografia", "foto", "figura", "imagen", "grafica", 
-                "iluminacion", "esquema", "croquis", "impresion", "vista"
-            ]
-            es_titulo_imagen = any(txt_limpio.startswith(prefix) for prefix in prefijos_fotos)
-
-            if tiene_imagen or es_titulo_imagen:
-                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                en_bloque_destinatario = False
-                continue
-
-            # B. ELEMENTOS A LA DERECHA
-            es_asunto = "asunto:" in txt_limpio or "se emite dictamen" in txt_limpio or txt_limpio.startswith("criminalistica de campo")
-            es_leyenda_oficial = "margarita maza parada" in txt_limpio or "ano de" in txt_limpio
-            es_lugar_fecha = bool(re.search(r'\b(ciudad de mexico|cdmx|estado de mexico|a)\b', txt_limpio)) and any(m in txt_limpio for m in ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"])
-
-            if es_asunto or es_leyenda_oficial or es_lugar_fecha:
-                p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-                en_bloque_destinatario = True
-                continue
-
-            # C. OTROS ELEMENTOS AL CENTRO
-            es_palabra_dictamen = "dictamen" in txt_limpio.replace(" ", "") and len(txt) < 30
-            es_atentamente = "atentamente" in txt_limpio and len(txt) < 30
-            es_perito = "perito en criminalistica" in txt_limpio
-
-            if es_palabra_dictamen or es_atentamente or es_perito:
-                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                en_bloque_destinatario = False
-                continue
-
-            # D. PALABRA PRESENTE Y DESTINATARIO A LA IZQUIERDA
-            es_presente = txt_limpio.replace(" ", "") == "presente"
-
-            if es_presente:
-                p.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                en_bloque_destinatario = False
-                continue
-
-            if en_bloque_destinatario and len(txt) < 120:
-                p.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                continue
-
-            # E. REGLA GENERAL: CUERPO JUSTIFICADO
-            if txt:
-                p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-
-        st.success("Auditoría completada exitosamente con Control de Cambios activo")
-        st.divider()
-
-        st.subheader("1. Datos Extraídos del PDF de Solicitud")
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Carpeta Inv.", carpeta_solicitud)
-        col2.metric("Folio", folio_solicitud)
-        col3.metric("Oficio", oficio_solicitud)
-        col4.metric("Remitente", remitente_solicitud)
-
-        st.divider()
-
-        st.subheader("2. Revisión del Documento doc sop (PDF)")
-        col_sop1, col_sop2 = st.columns(2)
-        
-        with col_sop1:
-            st.write("**Títulos requeridos:**")
-            for t_req, estuvo in titulos_sop_encontrados.items():
-                estado_str = "✅ Detectado" if estuvo else "❌ Faltante"
-                st.write(f"- **{t_req.title()}:** {estado_str}")
-
-        with col_sop2:
-            faltantes = [t.title() for t, estuvo in titulos_sop_encontrados.items() if not estuvo]
-            if faltantes:
-                st.error(f"Faltan los siguientes títulos en el doc sop: {', '.join(faltantes)}")
-            else:
-                st.success("El doc sop contiene todos los títulos obligatorios.")
-
-        st.divider()
-
-        st.subheader("3. Errores Gramaticales y Ortográficos Detectados")
-        if alertas_ortografia:
-            for ao in list(set(alertas_ortografia))[:10]:
-                st.warning(ao)
-        else:
-            st.success("No se detectaron faltas de acentuación técnica en palabras clave.")
-
-        st.divider()
-
-        st.subheader("4. Descargar Word Auditado")
-        bio = io.BytesIO()
-        doc.save(bio)
-        bio.seek(0)
-
-        st.download_button(
-            label="Descargar Word con Control de Cambios y Resaltado Amarillo",
-            data=bio,
-            file_name="DICTAMEN_AUDITADO_CONTROL_CAMBIOS.docx",
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        )
-
-    except Exception as doc_err:
-        st.error(f"Error procesando el documento Word: {doc_err}")
-
-else:
-    st.warning("Por favor, sube los tres archivos (PDF Solicitud, Word Dictamen y PDF doc sop) para iniciar la auditoría.")

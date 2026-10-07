@@ -56,7 +56,6 @@ def corregir_y_resaltar_ortografia(p, idx, alertas_ortografia):
 
     hubo_cambio = False
 
-    # Corrección iterando por cada fragmento (run) para preservar negritas e itálicas
     for run in p.runs:
         texto_run_original = run.text
         if not texto_run_original.strip():
@@ -74,26 +73,11 @@ def corregir_y_resaltar_ortografia(p, idx, alertas_ortografia):
         alertas_ortografia.append(f"Parrafo {idx}: Se subrayaron y corrigieron faltas de acentuacion tecnica (conservando negritas).")
 
 
-st.set_page_config(page_title="Auditor Pericial Integral", page_icon="⚖️", layout="centered")
-
-st.title("Auditor Pericial de Formalidad y Sintaxis")
-st.write("Sube el PDF de Solicitud y el Word del Dictamen para ejecutar la auditoria.")
-
-st.subheader("1. Carga de Documentos Oficiales")
-col_pdf, col_docx = st.columns(2)
-
-with col_pdf:
-    archivo_pdf = st.file_uploader("Subir Oficio de Solicitud (PDF)", type=["pdf"])
-with col_docx:
-    archivo_docx = st.file_uploader("Subir Dictamen Pericial en Word (.docx)", type=["docx"])
-
-if archivo_pdf is not None and archivo_docx is not None:
-    st.info("Archivos recibidos. Procesando auditoria...")
-
+def extraer_texto_pdf(archivo_pdf_obj):
     texto_pdf = ""
     try:
-        archivo_pdf.seek(0)
-        bytes_pdf = archivo_pdf.read()
+        archivo_pdf_obj.seek(0)
+        bytes_pdf = archivo_pdf_obj.read()
 
         with pdfplumber.open(io.BytesIO(bytes_pdf)) as pdf:
             for pagina in pdf.pages:
@@ -106,11 +90,33 @@ if archivo_pdf is not None and archivo_docx is not None:
                 imagenes = convert_from_bytes(bytes_pdf)
                 for img in imagenes:
                     texto_pdf += "\n" + pytesseract.image_to_string(img, lang="spa")
-            except Exception as ocr_err:
-                st.warning(f"No se pudo aplicar OCR en el PDF: {ocr_err}")
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return texto_pdf
 
-    except Exception as e:
-        st.error(f"Error al leer el archivo PDF: {e}")
+
+st.set_page_config(page_title="Auditor Pericial Integral", page_icon="⚖️", layout="centered")
+
+st.title("Auditor Pericial de Formalidad y Sintaxis")
+st.write("Sube el PDF de Solicitud, el Word del Dictamen y el PDF doc sop para ejecutar la auditoria.")
+
+st.subheader("1. Carga de Documentos Oficiales")
+col_pdf, col_docx, col_sop = st.columns(3)
+
+with col_pdf:
+    archivo_pdf = st.file_uploader("Subir Oficio de Solicitud (PDF)", type=["pdf"])
+with col_docx:
+    archivo_docx = st.file_uploader("Subir Dictamen Pericial en Word (.docx)", type=["docx"])
+with col_sop:
+    archivo_sop = st.file_uploader("Subir doc sop (PDF)", type=["pdf"])
+
+if archivo_pdf is not None and archivo_docx is not None and archivo_sop is not None:
+    st.info("Archivos recibidos. Procesando auditoria...")
+
+    # --- 1. LECTURA DEL PDF DE SOLICITUD ---
+    texto_pdf = extraer_texto_pdf(archivo_pdf)
 
     match_carpeta = re.search(r"(carpeta|expediente|causa|cui|ap|ci)\s*[\w\d\.\-/:]+", texto_pdf, re.IGNORECASE)
     carpeta_solicitud = match_carpeta.group(0).upper().strip() if match_carpeta else "NO DETECTADO"
@@ -126,6 +132,26 @@ if archivo_pdf is not None and archivo_docx is not None:
     match_remitente = re.search(r"(lic\.|mtro\.|mtra\.|dr\.|dra\.|licenciado|licenciada|c\.)\s+([a-záéíóúñ\s]+)", texto_pdf, re.IGNORECASE)
     remitente_solicitud = match_remitente.group(0).strip().upper() if match_remitente else "NO DETECTADO"
 
+    # --- 2. LECTURA Y VALIDACIÓN DEL PDF "DOC SOP" ---
+    texto_sop = extraer_texto_pdf(archivo_sop)
+    texto_sop_clean = quitar_acentos(texto_sop.lower())
+
+    titulos_sop_requeridos = [
+        "comunicacion con la autoridad",
+        "documentacion escrita",
+        "hoja de datos crudos",
+        "identificacion de riesgos",
+        "material",
+        "procesamiento de indicios",
+        "lineas base",
+        "croquis"
+    ]
+
+    titulos_sop_encontrados = {}
+    for tit in titulos_sop_requeridos:
+        titulos_sop_encontrados[tit] = tit in texto_sop_clean
+
+    # --- 3. AUDITORÍA EN WORD ---
     try:
         archivo_docx.seek(0)
         doc = docx.Document(archivo_docx)
@@ -178,52 +204,4 @@ if archivo_pdf is not None and archivo_docx is not None:
 
             es_palabra_dictamen = "dictamen" in txt_limpio.replace(" ", "") and len(txt) < 30
             es_atentamente = "atentamente" in txt_limpio and len(txt) < 30
-            es_perito = "perito en criminalistica" in txt_limpio
-            es_centrado = es_palabra_dictamen or es_atentamente or es_perito
-
-            if es_derecha:
-                p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-            elif es_centrado:
-                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            else:
-                if len(txt) > 40:
-                    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-
-        st.success("Auditoria completada exitosamente")
-        st.divider()
-
-        st.subheader("1. Datos Extraidos del PDF")
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Carpeta Inv.", carpeta_solicitud)
-        col2.metric("Folio", folio_solicitud)
-        col3.metric("Oficio", oficio_solicitud)
-        col4.metric("Remitente", remitente_solicitud)
-
-        st.divider()
-
-        st.subheader("2. Errores Gramaticales y Ortograficos Detectados")
-        if alertas_ortografia:
-            for ao in list(set(alertas_ortografia))[:10]:
-                st.warning(ao)
-        else:
-            st.success("No se detectaron faltas de acentuacion tecnica en palabras clave.")
-
-        st.divider()
-
-        st.subheader("3. Descargar Word Auditado")
-        bio = io.BytesIO()
-        doc.save(bio)
-        bio.seek(0)
-
-        st.download_button(
-            label="Descargar Word con Control de Cambios y Resaltado Amarillo",
-            data=bio,
-            file_name="DICTAMEN_AUDITADO_CONTROL_CAMBIOS.docx",
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        )
-
-    except Exception as doc_err:
-        st.error(f"Error procesando el documento Word: {doc_err}")
-
-else:
-    st.warning("Por favor, sube ambos archivos para iniciar la auditoria.")
+            es_perito = "perito en criminalistica" in
